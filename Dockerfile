@@ -12,4 +12,4 @@ EXPOSE 5700
 # 启动青龙
 CMD ["./start.sh"]
 # 数据持久化
-# COPY ql/scripts /ql/scripts
+COPY ql/scripts /ql/scripts
