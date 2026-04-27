@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-#name: 妖火吹牛
-#type: manual
-#tag: 游戏,妖火,吹牛
-#log: yaohuo_chuiniu
-#instance: single
-
+# ======================================
+# name: 妖火吹牛
+# cron: manual
+# tag: 游戏,妖火,吹牛
+# log: yaohuo_chuiniu
+# instance: single
+# ======================================
 import secrets
 import requests
 import time

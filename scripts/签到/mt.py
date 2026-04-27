@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-#name: MT签到
-#cron: 1 9 * * *
-#tag: 签到,MT论坛
-#log: mt_qiandao
-#instance: single
+# ======================================
+# name: MT签到
+# cron: 1 9 * * *
+# log: mt_qiandao
+# instance: single
+# ======================================
 
 import requests
 import re
