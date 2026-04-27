@@ -403,10 +403,10 @@ def check_bet_result():
         ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
         # 核心规则：仅挑战者名称为【应战】时，失败不翻倍
-        if challenger == "应战" and state.real_bet > 50000:
-            ZLog.w("本局挑战者为「应战」，失败不倍投，保持原金额")
-            state.target_bet = state.real_bet
-        else:
+       # if challenger == "应战" and state.real_bet > 50000:
+         #   ZLog.w("本局挑战者为「应战」，失败不倍投，保持原金额")
+         #   state.target_bet = state.real_bet
+     #   else:
             # 其他人 / 随机局 正常倍投
             state.target_bet = state.real_bet * CONFIG["multiplier"]
 
