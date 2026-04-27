@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ======================================
-# name: MT签到
+# name: MT签到-Cookie修复版
 # cron: 1 9 * * *
 # instance: single
 # ======================================
@@ -17,9 +17,15 @@ class MTBBS:
         self.session = requests.Session()
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 15; RMX3852 Build/UKQ1.231108.001) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.208 Mobile Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Connection': 'keep-alive',
+            'Referer': 'https://bbs.binmt.cc/forum.php',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document',
         }
         
         # 从环境变量读取Cookie，格式完整的Cookie字符串
@@ -27,16 +33,18 @@ class MTBBS:
         if self.cookie_str:
             self.headers['Cookie'] = self.cookie_str
 
-    def safe_request(self, url, method='GET', data=None, retry=2):
-        """安全请求函数"""
+    def safe_request(self, url, method='GET', data=None, retry=3):
+        """安全请求函数，增加重试次数和延迟"""
         for attempt in range(retry):
             try:
                 headers = self.headers.copy()
+                # 每次请求随机加一点延迟，降低风控概率
+                time.sleep(random.uniform(0.5, 2))
                 if method.upper() == 'GET':
-                    response = self.session.get(url, headers=headers, timeout=15)
+                    response = self.session.get(url, headers=headers, timeout=20)
                 else:
                     headers['Content-Type'] = 'application/x-www-form-urlencoded'
-                    response = self.session.post(url, data=data, headers=headers, timeout=15)
+                    response = self.session.post(url, data=data, headers=headers, timeout=20)
                 
                 if response.status_code in (200, 302):
                     return response
@@ -46,7 +54,7 @@ class MTBBS:
                 print(f"请求异常: {str(e)}")
             
             if attempt < retry - 1:
-                time.sleep(random.uniform(2, 4))
+                time.sleep(random.uniform(3, 6))
         
         return None
 
@@ -73,12 +81,14 @@ class MTBBS:
         sign_resp = self.safe_request(sign_url)
         if not sign_resp:
             return "签到页面访问失败"
-        print("=======================")
-        print(sign_resp.text)
+        
+        # 打印页面前200字符，方便调试风控情况
+        print("签到页面响应片段:", sign_resp.text[:200])
+        
         # 提取formhash
         formhash_match = re.search(r'formhash=([a-f0-9]+)', sign_resp.text)
         if not formhash_match:
-            return "formhash提取失败"
+            return "formhash提取失败，可能触发了安全验证"
         
         formhash = formhash_match.group(1)
         
@@ -130,7 +140,7 @@ class MTBBS:
         print("=" * 30)
         
         # 随机延迟
-        time.sleep(random.uniform(1, 3))
+        time.sleep(random.uniform(2, 5))
         
         # 先校验Cookie
         if not self.cookie_str:
@@ -145,7 +155,7 @@ class MTBBS:
             return result
         
         print("✅ Cookie有效，登录成功")
-        time.sleep(1)
+        time.sleep(random.uniform(1, 3))
         
         # 签到
         sign_msg = self.sign_in()
