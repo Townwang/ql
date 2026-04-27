@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-# ======================================
-# 青龙自动任务配置
-# name: 妖火吹牛任务
-# type: manual
-# tag: 游戏,妖火,吹牛
-# log: yaohuo_chuiniu
-# instance: single
-# ======================================
+#name: 妖火吹牛
+#type: manual
+#tag: 游戏,妖火,吹牛
+#log: yaohuo_chuiniu
+#instance: single
+
 import secrets
 import requests
 import time
