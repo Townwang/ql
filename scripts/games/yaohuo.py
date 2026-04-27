@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # ======================================
 # name: 妖火吹牛
-# tag: 游戏,妖火,吹牛
-# log: yaohuo_chuiniu
+# tag: 游戏,妖火
 # instance: single
 # ======================================
 
