@@ -73,7 +73,8 @@ class MTBBS:
         sign_resp = self.safe_request(sign_url)
         if not sign_resp:
             return "签到页面访问失败"
-        
+        print("=======================")
+        print(sign_resp.text)
         # 提取formhash
         formhash_match = re.search(r'formhash=([a-f0-9]+)', sign_resp.text)
         if not formhash_match:
