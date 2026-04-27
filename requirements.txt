@@ -1,0 +1,6 @@
+plyer
+bs4
+requests
+beautifulsoup4
+Crypto
+pycryptodome
