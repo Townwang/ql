@@ -22,8 +22,10 @@ class MTBBS:
             'Connection': 'keep-alive',
         }
         
-        self.username = os.getenv("MT_ACCOUNT", "").strip()
-        self.password = os.getenv("MT_PASSWORD", "").strip()
+        # 从环境变量读取Cookie，格式完整的Cookie字符串
+        self.cookie_str = os.getenv("MT_COOKIE", "").strip()
+        if self.cookie_str:
+            self.headers['Cookie'] = self.cookie_str
 
     def safe_request(self, url, method='GET', data=None, retry=2):
         """安全请求函数"""
@@ -36,9 +38,7 @@ class MTBBS:
                     headers['Content-Type'] = 'application/x-www-form-urlencoded'
                     response = self.session.post(url, data=data, headers=headers, timeout=15)
                 
-                if response.status_code == 200:
-                    return response
-                elif response.status_code == 302:
+                if response.status_code in (200, 302):
                     return response
                 else:
                     print(f"请求失败，状态码: {response.status_code}")
@@ -50,50 +50,19 @@ class MTBBS:
         
         return None
 
-    def login(self):
-        """登录功能"""
-        print("正在登录...")
+    def check_login(self):
+        """校验Cookie是否有效"""
+        print("正在校验Cookie登录状态...")
+        check_url = "https://bbs.binmt.cc/forum.php"
+        resp = self.safe_request(check_url)
+        if not resp:
+            return False, "访问论坛首页失败"
         
-        # 获取登录页面
-        login_url = "https://bbs.binmt.cc/member.php?mod=logging&action=login"
-        login_resp = self.safe_request(login_url)
-        if not login_resp:
-            return False, "登录页面获取失败"
-        
-        # 提取登录参数
-        html = login_resp.text
-        formhash_match = re.search(r'name="formhash"[^>]*value=[\'"]([^\'"]*)[\'"]', html)
-        referer_match = re.search(r'name="referer"[^>]*value="([^"]*)"', html)
-        
-        if not formhash_match:
-            return False, "formhash提取失败"
-        
-        formhash = formhash_match.group(1)
-        referer = referer_match.group(1) if referer_match else "https://bbs.binmt.cc/forum.php"
-        
-        # 构造登录数据
-        login_data = {
-            'formhash': formhash,
-            'referer': referer,
-            'username': self.username,
-            'password': self.password,
-            'loginsubmit': 'true'
-        }
-        
-        # 提交登录
-        login_post_url = "https://bbs.binmt.cc/member.php?mod=logging&action=login&loginsubmit=yes&inajax=1"
-        login_result = self.safe_request(login_post_url, 'POST', login_data)
-        
-        if not login_result:
-            return False, "登录请求失败"
-        
-        # 检查登录结果
-        if '登录成功' in login_result.text or 'window.location.href' in login_result.text:
-            return True, "登录成功"
-        elif '密码错误' in login_result.text:
-            return False, "账号或密码错误"
+        # 判断是否已登录：页面不含登录按钮、含有用户名特征
+        if "登录" not in resp.text or "个人中心" in resp.text:
+            return True, "Cookie有效，已登录"
         else:
-            return False, "登录失败"
+            return False, "Cookie失效，请重新获取"
 
     def sign_in(self):
         """签到功能"""
@@ -124,7 +93,6 @@ class MTBBS:
         if "今日已签" in result_text:
             return "今日已完成签到"
         elif "签到成功" in result_text:
-            # 提取奖励信息
             reward_match = re.search(r'获得奖励\s*(\S+)', result_text)
             reward = reward_match.group(1) if reward_match else "未知奖励"
             return f"签到成功！获得：{reward}"
@@ -156,21 +124,26 @@ class MTBBS:
     def run(self):
         """主运行流程"""
         print("=" * 30)
-        print("MT论坛签到开始")
+        print("MT论坛Cookie版签到开始")
         print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 30)
         
         # 随机延迟
         time.sleep(random.uniform(1, 3))
         
-        # 登录
-        login_ok, login_msg = self.login()
-        if not login_ok:
-            result = f"❌ 登录失败: {login_msg}"
+        # 先校验Cookie
+        if not self.cookie_str:
+            result = "❌ 未配置MT_COOKIE环境变量"
             print(result)
             return result
         
-        print("✅ 登录成功")
+        login_ok, login_msg = self.check_login()
+        if not login_ok:
+            result = f"❌ Cookie校验失败: {login_msg}"
+            print(result)
+            return result
+        
+        print("✅ Cookie有效，登录成功")
         time.sleep(1)
         
         # 签到
@@ -183,8 +156,7 @@ class MTBBS:
         
         # 构造结果
         result = (
-            f"【MT论坛签到结果】\n"
-            f"账号: {self.username}\n"
+            f"【MT论坛Cookie签到结果】\n"
             f"签到: {sign_msg}\n"
             f"账户: {credit_info}\n"
             f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
