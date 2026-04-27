@@ -27,7 +27,7 @@ CONFIG = {
     "max_network_errors": 10,   # 网络错误次数
     "request_retries": 5,       # 请求接口重试
     "request_timeout": 20,      # 请求超时时间
-    "multiplier": 2.2,          # 倍投倍数
+    "multiplier": 2.39,          # 倍投倍数
 }
 
 # 路径常量
