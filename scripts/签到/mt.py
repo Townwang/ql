@@ -22,8 +22,9 @@ class MTBBS:
             'Accept-Language': 'zh-CN,zh;q=0.9',
             'Connection': 'keep-alive',
         }
-        self.username = "town"
-        self.password = "zhen521"
+        
+        self.username = os.getenv("MT_ACCOUNT", "").strip()
+        self.password = os.getenv("MT_PASSWORD", "").strip()
 
     def safe_request(self, url, method='GET', data=None, retry=2):
         """安全请求函数"""
