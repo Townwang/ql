@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
 # ======================================
+# 添加任务
 # name: 妖火吹牛
 # tag: 游戏,妖火
 # instance: single
+# 变量声明
+# @env YH_COOKIE= 妖火Cookie
+# @env YH_PASSWORD= 你的妖火密码
+# @env YH_TEST= 测试
+# 依赖声明
+# @pip requests
+# @pip plyer
+# @pip bs4
+# @pip beautifulsoup4
+# @pip Crypto
+# @pip pycryptodome
 # ======================================
 
 import secrets
