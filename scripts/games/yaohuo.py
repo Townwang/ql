@@ -158,80 +158,53 @@ class ZLog:
         ZLog.log_color(msg, "#3498db")
 
 # ======================================
-# 配置校验
+# 【分开题库：赢局、输局、默认通用】
 # ======================================
-def check_config_valid():
-    required_numeric = [
-        "base_bet", "max_bet",
-        "max_network_errors", "request_retries", "request_timeout",
-    ]
-    for key in required_numeric:
-        val = CONFIG.get(key)
-        if not isinstance(val, (int, float)) or val < 0:
-            ZLog.e(f"配置项 {key} 不合法")
-            return False
-    if not PASSWORD:
-        ZLog.w("警告：未设置 YH_PASSWORD 环境变量，投注可能需要密码")
-    return True
-
-# ======================================
-# 带重试请求 + 每错一次递增1分钟延迟
-# ======================================
-def request_with_retry(url, method="GET", data=None):
-    retry_max = CONFIG["request_retries"]
-    timeout = CONFIG["request_timeout"]
-    
-    for attempt in range(1, retry_max + 1):
-        try:
-            if method.upper() == "GET":
-                resp = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout)
-            else:
-                resp = requests.post(url, headers=REQUEST_HEADERS, data=data, timeout=timeout)
-            resp.raise_for_status()
-            
-            if "请先登录" in resp.text or "登录网站" in resp.text:
-                ZLog.e("登录已失效")
-                state.is_running = False
-                return None
-            
-            # 请求成功 重置错误计数
-            state.network_error_count = 0
-            return resp
-
-        except Exception as e:
-            state.network_error_count += 1
-            # 每出错一次 延迟 = 错误次数 * 60秒
-            delay_sec = state.network_error_count * 60
-            ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec//60}分钟后重试")
-            
-            # 错误超限 直接停止
-            if state.network_error_count >= CONFIG["max_network_errors"]:
-                ZLog.e("网络错误次数超限，脚本停止运行")
-                state.is_running = False
-                return None
-            
-            time.sleep(delay_sec)
-
-# ======================================
-# 挑衅话术库（可自己随意增删）
-# ======================================
-def get_provoke_words():
+# 上一局赢了 专用话术
+def get_win_provoke_words():
     return [
-        "你还敢来吗？",
-        "你有胆继续",
-        "这局必胜局，你还敢来吗？",
-        "有本事继续？",
-        "这把专为你设计",
-        "给我吐回来"
+        "还敢再来送吗？",
+        "实力碾压，不服继续",
+        "就这水平还敢应战？",
+        "继续来，接着赢你",
+        "拿捏了，敢接招吗？",
+        "轻松拿下，再来一局？"
     ]
 
+# 上一局输了 专用话术
+def get_lose_provoke_words():
+    return [
+        "刚才大意了，敢再来吗？",
+        "运气而已，这局必翻盘",
+        "还给我，敢不敢接？",
+        "上局运气不好，再战一局",
+        "别得意，这局赢回来",
+        "翻盘局，敢应战就来"
+    ]
+
+# 无历史记录 第一次开局 默认话术
+def get_default_provoke_words():
+    return [
+        "来战？"
+    ]
+
+# 自动根据上局胜负选择题库
+def get_provoke_words_by_result():
+    if state.last_result == "win":
+        return get_win_provoke_words()
+    elif state.last_result == "lose":
+        return get_lose_provoke_words()
+    else:
+        return get_default_provoke_words()
+
 # ======================================
-# 动态生成题目：上一局挑战者 + 挑衅话术
+# 动态生成题目：上一局挑战者 + 对应题库挑衅话术
 # ======================================
 def gen_dynamic_question():
     # 用上一局挑战者，没有就默认陌生人
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
-    provoke = random.choice(get_provoke_words())
+    # 自动选赢/输/默认题库
+    provoke = random.choice(get_provoke_words_by_result())
     title = f"🐮 {nick}：{provoke}"
     opt1 = "🔥"
     opt2 = "🔥"
@@ -459,6 +432,61 @@ def check_bet_result():
     return result
 
 # ======================================
+# 配置校验
+# ======================================
+def check_config_valid():
+    required_numeric = [
+        "base_bet", "max_bet",
+        "max_network_errors", "request_retries", "request_timeout",
+    ]
+    for key in required_numeric:
+        val = CONFIG.get(key)
+        if not isinstance(val, (int, float)) or val < 0:
+            ZLog.e(f"配置项 {key} 不合法")
+            return False
+    if not PASSWORD:
+        ZLog.w("警告：未设置 YH_PASSWORD 环境变量，投注可能需要密码")
+    return True
+
+# ======================================
+# 带重试请求 + 每错一次递增1分钟延迟
+# ======================================
+def request_with_retry(url, method="GET", data=None):
+    retry_max = CONFIG["request_retries"]
+    timeout = CONFIG["request_timeout"]
+    
+    for attempt in range(1, retry_max + 1):
+        try:
+            if method.upper() == "GET":
+                resp = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout)
+            else:
+                resp = requests.post(url, headers=REQUEST_HEADERS, data=data, timeout=timeout)
+            resp.raise_for_status()
+            
+            if "请先登录" in resp.text or "登录网站" in resp.text:
+                ZLog.e("登录已失效")
+                state.is_running = False
+                return None
+            
+            # 请求成功 重置错误计数
+            state.network_error_count = 0
+            return resp
+
+        except Exception as e:
+            state.network_error_count += 1
+            # 每出错一次 延迟 = 错误次数 * 60秒
+            delay_sec = state.network_error_count * 60
+            ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec//60}分钟后重试")
+            
+            # 错误超限 直接停止
+            if state.network_error_count >= CONFIG["max_network_errors"]:
+                ZLog.e("网络错误次数超限，脚本停止运行")
+                state.is_running = False
+                return None
+            
+            time.sleep(delay_sec)
+
+# ======================================
 # 密码验证
 # ======================================
 def verify_password():
@@ -491,7 +519,7 @@ def send_bet():
         return False
     if not verify_password():
         return False
-    # 改用动态生成题目：上一局挑战者+挑衅话术
+    # 改用动态生成题目：自动区分赢/输题库
     questions = gen_dynamic_question()
     title, opt1, opt2 = questions
     choose = choose_bet_answer()
