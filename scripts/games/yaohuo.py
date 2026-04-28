@@ -205,7 +205,7 @@ def gen_dynamic_question():
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
     # 自动选赢/输/默认题库
     provoke = random.choice(get_provoke_words_by_result())
-    title = f"🐮 {nick}：{provoke}"
+    title = f"🐮「{nick}」{provoke}"
     opt1 = "🔥"
     opt2 = "🔥"
     return [title, opt1, opt2]
