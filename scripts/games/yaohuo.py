@@ -41,12 +41,11 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 100,           # 基础投注
-    "max_bet": 5000000,         # 单次最大投注
-    "max_network_errors": 10,   # 网络错误次数
-    "request_retries": 5,       # 请求接口重试
-    "request_timeout": 20,      # 请求超时时间
-    "multiplier": 2.39,          # 倍投倍数
+    "base_bet": 5000,           # 基础投注
+    "max_bet": 5000000,        # 单次最大投注
+    "max_network_errors": 10,  # 网络错误超限次数
+    "request_retries": 5,      # 单接口请求重试次数
+    "request_timeout": 20,     # 请求超时时间
 }
 
 # 路径常量
@@ -68,8 +67,10 @@ class GameState:
         self.is_running = True
         self.network_error_count = 0
 
-        self.target_bet = CONFIG["base_bet"]
-        self.real_bet = CONFIG["base_bet"]
+        self.base_bet = CONFIG["base_bet"]
+        self.total_lose_sum = 0
+        self.target_bet = self.base_bet
+        self.real_bet = self.base_bet
         self.consecutive_losses = 0
 
         self.win_count = 0
@@ -160,7 +161,7 @@ class ZLog:
 # ======================================
 def check_config_valid():
     required_numeric = [
-        "base_bet", "max_bet", "multiplier",
+        "base_bet", "max_bet",
         "max_network_errors", "request_retries", "request_timeout",
     ]
     for key in required_numeric:
@@ -173,11 +174,12 @@ def check_config_valid():
     return True
 
 # ======================================
-# 带重试请求
+# 带重试请求 + 每错一次递增1分钟延迟
 # ======================================
 def request_with_retry(url, method="GET", data=None):
     retry_max = CONFIG["request_retries"]
     timeout = CONFIG["request_timeout"]
+    
     for attempt in range(1, retry_max + 1):
         try:
             if method.upper() == "GET":
@@ -185,20 +187,29 @@ def request_with_retry(url, method="GET", data=None):
             else:
                 resp = requests.post(url, headers=REQUEST_HEADERS, data=data, timeout=timeout)
             resp.raise_for_status()
+            
             if "请先登录" in resp.text or "登录网站" in resp.text:
                 ZLog.e("登录已失效")
                 state.is_running = False
                 return None
+            
+            # 请求成功 重置错误计数
             state.network_error_count = 0
             return resp
+
         except Exception as e:
-            if attempt == retry_max:
-                ZLog.w(f"请求失败: {str(e)[:30]}")
             state.network_error_count += 1
+            # 每出错一次 延迟 = 错误次数 * 60秒
+            delay_sec = state.network_error_count * 60
+            ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec//60}分钟后重试")
+            
+            # 错误超限 直接停止
             if state.network_error_count >= CONFIG["max_network_errors"]:
-                ZLog.e("网络错误超限，停止")
+                ZLog.e("网络错误次数超限，脚本停止运行")
                 state.is_running = False
                 return None
+            
+            time.sleep(delay_sec)
 
 # ======================================
 # 题库
@@ -338,9 +349,11 @@ def parse_game_records(html):
 
 # ======================================
 # 投注金额计算
+# 规则：输局下局 = 前面总输掉总和 + 基础投注
 # ======================================
-def calc_real_bet(base_amount):
-    final_int = int(base_amount)
+def calc_real_bet():
+    next_bet = state.total_lose_sum + state.base_bet
+    final_int = int(next_bet)
     final_int = max(min(final_int, CONFIG["max_bet"]), CONFIG["base_bet"])
     return final_int
 
@@ -366,7 +379,7 @@ def choose_bet_answer():
     return ans
 
 # ======================================
-# 胜负结算【精准判断：挑战者=应战 才不翻倍】
+# 胜负结算
 # ======================================
 def check_bet_result():
     html = get_game_record_html()
@@ -398,39 +411,40 @@ def check_bet_result():
     challenger = target.get("challenger", "").strip()
     state.current_challenger = challenger
 
-    # 展示
     ZLog.i(f"挑战者: {challenger}")
     if result == "win":
         state.win_count += 1
         state.consecutive_losses = 0
         state.total_profit += amount
         state.last_result = "win"
+        # 赢局重置
+        state.total_lose_sum = 0
+        state.target_bet = state.base_bet
         refresh_balance()
         ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
-        state.target_bet = CONFIG["base_bet"]
 
     elif result == "lose":
         state.loss_count += 1
         state.consecutive_losses += 1
         state.total_profit -= amount
         state.last_result = "lose"
+        # 累加本局输掉金额到总亏损
+        state.total_lose_sum += amount
         refresh_balance()
-        ZLog.w(f"连败: {state.consecutive_losses}")
+        ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
         ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
-        # 核心规则：仅挑战者名称为【应战】时，失败不翻倍
         if challenger == "应战" and state.real_bet > 30000:
-            ZLog.w("本局挑战者为「应战」，失败不倍投，保持原金额")
+            ZLog.w("本局挑战者为「应战」，不执行累进规则，保持原投注")
             state.target_bet = state.real_bet
         else:
-            # 其他人 / 随机局 正常倍投
-            state.target_bet = state.real_bet * CONFIG["multiplier"]
+            state.target_bet = calc_real_bet()
 
     else:
         state.last_bet_id = None
         return None
 
-    state.real_bet = calc_real_bet(state.target_bet)
+    state.real_bet = state.target_bet
     state.last_bet_id = None
     save_game_state()
     refresh_balance()
@@ -570,7 +584,8 @@ def save_game_state():
             "last_result": state.last_result,
             "last_choice": state.last_choice,
             "save_date": state.save_date,
-            "current_challenger": state.current_challenger
+            "current_challenger": state.current_challenger,
+            "total_lose_sum": state.total_lose_sum
         }
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -594,8 +609,10 @@ def load_game_state():
         state.last_choice = data.get("last_choice")
         state.save_date = data.get("save_date", today)
         state.current_challenger = data.get("current_challenger", "")
+        state.total_lose_sum = data.get("total_lose_sum", 0)
         if state.save_date != today:
             state.total_bet_amount = 0
+            state.total_lose_sum = 0
             state.save_date = today
         else:
             state.total_bet_amount = data.get("total_bet_amount", 0)
@@ -625,10 +642,9 @@ def main():
     state.last_bet_id = None
     state.last_ongoing_ids = None
     state.is_running = True
+    state.base_bet = CONFIG["base_bet"]
 
     ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']}")
-    ZLog.i(f"今日已投:{state.total_bet_amount} | 余额:{state.current_balance}")
-    ZLog.d("开始运行...")
 
     try:
         while state.is_running:
