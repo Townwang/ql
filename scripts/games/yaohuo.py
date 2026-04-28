@@ -89,6 +89,7 @@ class GameState:
         self.save_date = self.get_today()
         
         self.current_challenger = ""
+        self.last_challenger = ""  # 保存上一局挑战者
 
     @staticmethod
     def get_today():
@@ -212,25 +213,35 @@ def request_with_retry(url, method="GET", data=None):
             time.sleep(delay_sec)
 
 # ======================================
-# 题库
+# 挑衅话术库（可自己随意增删）
 # ======================================
-def get_question_pool():
+def get_provoke_words():
     return [
-        ["🐮 我的公众号有哪些？", "开源人", "软件学"],
-        ["🐶 我的公众号有哪些？", "软件学", "软件人"],
-        ["🐯 我的公众号有哪些？", "软件学", "开源人"],
-        ["🐼 我的公众号有哪些？", "开源人", "软件人"],
-        ["🐹 我的公众号有哪些？", "软件人", "开源人"],
-        ["🐓 我的公众号有哪些？", "软件人", "软件学"],
-        ["🐷 我的个人站有哪些？", "https://hunter.wang", "https://townwang.com"],
-        ["🐸 我的个人站有哪些？", "https://hunter.wang", "https://townwang.cn"],
-        ["🐢 我的个人站有哪些？", "https://townwang.com", "https://hunter.wang"],
-        ["🦆 我的个人站有哪些？", "https://townwang.com", "https://townwang.cn"],
-        ["🦉 我的个人站有哪些？", "https://townwang.cn", "https://townwang.com"],
-        ["️️🕷️️ 我的个人站有哪些？", "https://townwang.cn", "https://hunter.wang"],
-        ["🦕 公众号: 『开源人』、『软件人』、『软件学』", "🌏", "🌏"],
-        ["🦜 个人站: [hunter.wang],[townwang.com],[townwang.cn]", "🌍", "🌍"]
+        "这把我必稳赢，你没戏",
+        "这把运势在我，必拿下",
+        "系统给我安排必胜局",
+        "我今天运势拉满必连胜",
+        "你这把注定要输给我",
+        "风水轮流转这把该我赢",
+        "冥冥之中注定我拿胜",
+        "这把天意已定我必胜",
+        "别挣扎了结果早已注定",
+        "全局运势压制稳吃你",
+        "好运加持这把必拿捏",
+        "天命局谁来都赢不了我"
     ]
+
+# ======================================
+# 动态生成题目：上一局挑战者 + 挑衅话术
+# ======================================
+def gen_dynamic_question():
+    # 用上一局挑战者，没有就默认陌生人
+    nick = state.last_challenger if state.last_challenger else "神秘玩家"
+    provoke = random.choice(get_provoke_words())
+    title = f"🐮 {nick}：{provoke}"
+    opt1 = "🔥"
+    opt2 = "🔥"
+    return [title, opt1, opt2]
 
 # ======================================
 # 安全随机
@@ -409,6 +420,9 @@ def check_bet_result():
     result = target["status"]
     amount = target["amount"]
     challenger = target.get("challenger", "").strip()
+    
+    # 保存当前挑战者为下一局使用
+    state.last_challenger = challenger
     state.current_challenger = challenger
 
     ZLog.i(f"挑战者: {challenger}")
@@ -483,9 +497,11 @@ def send_bet():
         return False
     if not verify_password():
         return False
-    questions = random.choice(get_question_pool())
+    # 改用动态生成题目：上一局挑战者+挑衅话术
+    questions = gen_dynamic_question()
     title, opt1, opt2 = questions
     choose = choose_bet_answer()
+    ZLog.i(f"动态题目: {title}")
     post_data = {
         'mymoney': str(bet_amount),
         'question': title,
@@ -585,7 +601,8 @@ def save_game_state():
             "last_choice": state.last_choice,
             "save_date": state.save_date,
             "current_challenger": state.current_challenger,
-            "total_lose_sum": state.total_lose_sum
+            "total_lose_sum": state.total_lose_sum,
+            "last_challenger": state.last_challenger
         }
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -610,6 +627,7 @@ def load_game_state():
         state.save_date = data.get("save_date", today)
         state.current_challenger = data.get("current_challenger", "")
         state.total_lose_sum = data.get("total_lose_sum", 0)
+        state.last_challenger = data.get("last_challenger", "")
         if state.save_date != today:
             state.total_bet_amount = 0
             state.total_lose_sum = 0
