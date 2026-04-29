@@ -561,7 +561,7 @@ def wait_result():
 def round_delay():
     if state.last_result == "win":
         return
-    if state.consecutive_losses < 6:
+    if state.consecutive_losses < 10:
         return
     minutes = state.consecutive_losses
     seconds = minutes * 60
