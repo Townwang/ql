@@ -41,7 +41,7 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 100,           # 基础投注
+    "base_bet": 500,           # 基础投注
     "max_bet": 99999,        # 单次最大投注
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
@@ -631,7 +631,7 @@ def load_game_state():
     if not os.path.exists(STATE_FILE):
         return
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         today = state.get_today()
         state.target_bet = data.get("target_bet", CONFIG["base_bet"])
@@ -686,24 +686,26 @@ def main():
         while state.is_running:
             html = get_game_record_html()
             records = parse_game_records(html) if html else []
-            ongoing_records = [r for r in records if r["status"] == "unknown"]
-            ongoing = len(ongoing_records) > 0
+            ongoing = [r for r in records if r["status"] == "unknown"]
 
+            # ====================== 核心改动 ======================
+            # 有进行中的对局，判断金额是否超限
             if ongoing:
-                # ====================== 核心逻辑 ======================
-                # 取正在进行中的那局金额
-                ongoing_amount = ongoing_records[0].get("amount", 0)
-                if ongoing_amount > CONFIG["max_bet"]:
-                    # 进行中金额 > 最大投注 → 跳过不等待
-                    ZLog.w(f"进行中金额 {format_money(ongoing_amount)} > 最大投注，跳过等待")
+                skip_this = False
+                for g in ongoing:
+                    amt = g.get("amount", 0)
+                    if amt > CONFIG["max_bet"]:
+                        ZLog.w(f"进行中对局金额 {format_money(amt)} > 最大投注 {format_money(CONFIG['max_bet'])}，跳过此局")
+                        skip_this = True
+                        break
+                if skip_this:
                     state.last_bet_id = None
-                    state.last_ongoing_ids = None
-                    time.sleep(1)
-                else:
-                    # ≤ 最大投注 → 正常等待
-                    wait_result()
-                    round_delay()
-                # ======================================================
+                    time.sleep(3)
+                    continue
+
+                # 没超限制才等待结果
+                wait_result()
+                round_delay()
             else:
                 if send_bet():
                     wait_result()
