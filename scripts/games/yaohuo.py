@@ -694,6 +694,7 @@ def main():
                 skip_this = False
                 for g in ongoing:
                     amt = g.get("amount", 0)
+                    ZLog.w(f"进行中对局金额 {format_money(amt)}")
                     if amt > CONFIG["max_bet"]:
                         ZLog.w(f"进行中对局金额 {format_money(amt)} > 最大投注 {format_money(CONFIG['max_bet'])}，跳过此局")
                         skip_this = True
