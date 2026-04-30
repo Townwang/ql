@@ -41,7 +41,7 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 500,           # 基础投注
+    "base_bet": 100,           # 基础投注
     "max_bet": 99999,        # 单次最大投注
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
@@ -415,10 +415,6 @@ def check_bet_result():
         ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
         ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
-      #  if challenger == "应战" and state.real_bet > 30000:
-      #      ZLog.w("本局挑战者为「应战」，不执行累进规则，保持原投注")
-      #      state.target_bet = state.real_bet
-      #  else:
         state.target_bet = calc_real_bet()
 
     else:
@@ -693,8 +689,17 @@ def main():
             ongoing = any(r["status"] == "unknown" for r in records)
 
             if ongoing:
-                wait_result()
-                round_delay()
+                # ====================== 核心修改 ======================
+                # 只有当前投注 ≤ 最大投注 才等待结果
+                if state.real_bet <= CONFIG["max_bet"]:
+                    ZLog.i(f"等待挑战...")
+                    wait_result()
+                    round_delay()
+                else:
+                    state.last_bet_id = None
+                    state.last_ongoing_ids = None
+                    time.sleep(1)
+                # =======================================================
             else:
                 if send_bet():
                     wait_result()
