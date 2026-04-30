@@ -163,29 +163,35 @@ class ZLog:
 # 上一局赢了 专用话术
 def get_win_provoke_words():
     return [
-        "还敢再来送吗？",
-        "实力碾压，不服继续",
-        "就这水平还敢应战？",
-        "继续来，接着赢你",
-        "拿捏了，敢接招吗？",
-        "轻松拿下，再来一局？"
+        "🙄🌚😛😍😘😏"
     ]
+#    return [
+#        "还敢再来送吗？",
+#        "实力碾压，不服继续",
+#        "就这水平还敢应战？",
+#        "继续来，接着赢你",
+#        "拿捏了，敢接招吗？",
+#        "轻松拿下，再来一局？"
+#    ]
 
 # 上一局输了 专用话术
 def get_lose_provoke_words():
     return [
-        "刚才大意了，敢再来吗？",
-        "运气而已，这局必翻盘",
-        "还给我，敢不敢接？",
-        "上局运气不好，再战一局",
-        "别得意，这局赢回来",
-        "翻盘局，敢应战就来"
+        "🙈🙊🙉🌸🍀🌹"
     ]
+#    return [
+#        "刚才大意了，敢再来吗？",
+ #       "运气而已，这局必翻盘",
+#        "还给我，敢不敢接？",
+#        "上局运气不好，再战一局",
+#        "别得意，这局赢回来",
+#        "翻盘局，敢应战就来"
+#    ]
 
 # 无历史记录 第一次开局 默认话术
 def get_default_provoke_words():
     return [
-        "来战？"
+        "🐶"
     ]
 
 # 自动根据上局胜负选择题库
@@ -205,9 +211,9 @@ def gen_dynamic_question():
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
     # 自动选赢/输/默认题库
     provoke = random.choice(get_provoke_words_by_result())
-    title = f"🐮「{nick}」{provoke}"
-    opt1 = "🔥"
-    opt2 = "🔥"
+    title = f"{nick},{provoke}"
+    opt1 = "🤔"
+    opt2 = "🥳"
     return [title, opt1, opt2]
 
 # ======================================
