@@ -415,6 +415,10 @@ def check_bet_result():
         ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
         ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
+      #  if challenger == "应战" and state.real_bet > 30000:
+      #      ZLog.w("本局挑战者为「应战」，不执行累进规则，保持原投注")
+      #      state.target_bet = state.real_bet
+      #  else:
         state.target_bet = calc_real_bet()
 
     else:
@@ -686,25 +690,9 @@ def main():
         while state.is_running:
             html = get_game_record_html()
             records = parse_game_records(html) if html else []
-            ongoing = [r for r in records if r["status"] == "unknown"]
+            ongoing = any(r["status"] == "unknown" for r in records)
 
-            # ====================== 核心改动 ======================
-            # 有进行中的对局，判断金额是否超限
             if ongoing:
-                skip_this = False
-                for g in ongoing:
-                    amt = g.get("amount", 0)
-                    ZLog.w(f"进行中对局金额 {format_money(amt)}")
-                    if amt > CONFIG["max_bet"]:
-                        ZLog.w(f"进行中对局金额 {format_money(amt)} > 最大投注 {format_money(CONFIG['max_bet'])}，跳过此局")
-                        skip_this = True
-                        break
-                if skip_this:
-                    state.last_bet_id = None
-                    time.sleep(3)
-                    continue
-
-                # 没超限制才等待结果
                 wait_result()
                 round_delay()
             else:
