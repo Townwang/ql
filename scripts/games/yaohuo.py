@@ -91,6 +91,9 @@ class GameState:
         self.current_challenger = ""
         self.last_challenger = ""  # 保存上一局挑战者
 
+        # 新增：余额不足只提醒一次标记
+        self.balance_low_notified = False
+
     @staticmethod
     def get_today():
         return time.strftime("%Y-%m-%d")
@@ -407,6 +410,8 @@ def check_bet_result():
         # 赢局重置
         state.total_lose_sum = 0
         state.target_bet = state.base_bet
+        # 赢钱后重置余额不足提醒
+        state.balance_low_notified = False
         refresh_balance()
         ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
 
@@ -520,9 +525,14 @@ def send_bet():
     bet_amount = state.real_bet
     refresh_balance()
     if state.current_balance < bet_amount:
-        ZLog.e(f"余额不足 {format_money(state.current_balance)} < {format_money(bet_amount)}")
+        # 只提醒一次
+        if not state.balance_low_notified:
+            ZLog.e(f"余额不足 {format_money(state.current_balance)} < {format_money(bet_amount)}")
+            state.balance_low_notified = True
         time.sleep(10)
         return False
+    # 余额足够时重置提醒标记
+    state.balance_low_notified = False
     if not verify_password():
         return False
     # 改用动态生成题目：自动区分赢/输题库
