@@ -166,12 +166,7 @@ class ZLog:
 # 上一局赢了 专用话术
 def get_win_provoke_words():
     return [
-        "应　
-　　　　　战　
-　　　　　不　
-　　　　　得　
-　　　　　挑　
-　　　　　战"
+        "ᅟᅠ"
     ]
 #    return [
 #        "还敢再来送吗？",
@@ -185,12 +180,7 @@ def get_win_provoke_words():
 # 上一局输了 专用话术
 def get_lose_provoke_words():
     return [
-        "应　
-　　　　　战　
-　　　　　不　
-　　　　　得　
-　　　　　挑　
-　　　　　战"
+        "ᅟᅠ"
     ]
 #    return [
 #        "刚才大意了，敢再来吗？",
@@ -204,13 +194,7 @@ def get_lose_provoke_words():
 # 无历史记录 第一次开局 默认话术
 def get_default_provoke_words():
     return [
-        
-        "应　
-　　　　　战　
-　　　　　不　
-　　　　　得　
-　　　　　挑　
-　　　　　战"
+        "ᅟᅠ"
     ]
 
 # 自动根据上局胜负选择题库
@@ -231,8 +215,8 @@ def gen_dynamic_question():
     # 自动选赢/输/默认题库
     provoke = random.choice(get_provoke_words_by_result())
     title = f"{provoke}"
-    opt1 = "✅"
-    opt2 = "❎"
+    opt1 = "ᅟᅠ"
+    opt2 = "ᅟᅠ"
     return [title, opt1, opt2]
 
 # ======================================
