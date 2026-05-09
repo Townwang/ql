@@ -41,7 +41,7 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 100,           # 基础投注
+    "base_bet": 500,           # 基础投注
     "max_bet": 99999,        # 单次最大投注
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
@@ -166,7 +166,7 @@ class ZLog:
 # 上一局赢了 专用话术
 def get_win_provoke_words():
     return [
-        "💟"
+        "㍿"
     ]
 #    return [
 #        "还敢再来送吗？",
@@ -180,7 +180,7 @@ def get_win_provoke_words():
 # 上一局输了 专用话术
 def get_lose_provoke_words():
     return [
-        "💟"
+        "〠"
     ]
 #    return [
 #        "刚才大意了，敢再来吗？",
@@ -194,7 +194,7 @@ def get_lose_provoke_words():
 # 无历史记录 第一次开局 默认话术
 def get_default_provoke_words():
     return [
-        "🕎"
+        "✉︎"
     ]
 
 # 自动根据上局胜负选择题库
