@@ -539,7 +539,6 @@ def send_bet():
     questions = gen_dynamic_question()
     title, opt1, opt2 = questions
     choose = choose_bet_answer()
-    ZLog.i(f"动态题目: {title}")
     post_data = {
         'mymoney': str(bet_amount),
         'question': title,
