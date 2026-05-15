@@ -571,7 +571,7 @@ def wait_result():
         res = check_bet_result()
         if res is not None:
             return True
-        time.sleep(2)
+        time.sleep(1)
 
 # ======================================
 # 延迟
