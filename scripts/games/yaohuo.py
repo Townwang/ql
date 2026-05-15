@@ -604,14 +604,20 @@ def send_bet():
     return True
 
 # ======================================
-# 等待结果
+# 等待结果 - 渐进式退避轮询
 # ======================================
 def wait_result():
+    poll_delay = 0  # 第一次轮询延迟0秒（立即检查）
+    max_delay = 5   # 最多5秒
     while state.is_running:
+        if poll_delay > 0:
+            time.sleep(poll_delay)
+        
         res = check_bet_result()
         if res is not None:
             return True
-#        time.sleep(1)
+        # 渐进式增加延迟：0 → 0.1 → 0.2 → ... 最多5秒
+        poll_delay = min(poll_delay + 0.1, max_delay)
 
 # ======================================
 # 延迟
