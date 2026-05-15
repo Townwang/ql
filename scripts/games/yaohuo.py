@@ -17,7 +17,6 @@ instance: single
 """
 @pip requests
 @pip plyer
-@pip bs4
 @pip beautifulsoup4
 @pip Crypto
 @pip pycryptodome
@@ -165,8 +164,10 @@ class ZLog:
 # ======================================
 # 上一局赢了 专用话术
 def get_win_provoke_words():
+    # 用上一局挑战者，没有就默认陌生人
+    nick = state.last_challenger if state.last_challenger else "神秘玩家"
     return [
-        "🥳🥳🥳🥳🥳🥳"
+        f"😁😁上局赢了{nick},嘻嘻😁😁"
     ]
 #    return [
 #        "还敢再来送吗？",
@@ -179,8 +180,10 @@ def get_win_provoke_words():
 
 # 上一局输了 专用话术
 def get_lose_provoke_words():
+    # 用上一局挑战者，没有就默认陌生人
+    nick = state.last_challenger if state.last_challenger else "神秘玩家"
     return [
-        "🙁🙁🙁🙁🙁🙁"
+        f"🙁🙁可恶的{nick},不嘻嘻🙁🙁"
     ]
 #    return [
 #        "刚才大意了，敢再来吗？",
@@ -733,6 +736,5 @@ def main():
         ZLog.i(f"总盈亏:{state.total_profit} 今日投注:{state.total_bet_amount}")
         ZLog.d(f"最终余额:{state.current_balance}")
         ZLog.i("=" * 20)
-
 if __name__ == "__main__":
     main()
