@@ -31,8 +31,8 @@ from bs4 import BeautifulSoup
  # ======================================
  # 青龙环境变量 - 【必须配置Cookie！】
  # ======================================
- COOKIE = os.getenv("YH_COOKIE", "").strip()
- CONFIG = {
+COOKIE = os.getenv("YH_COOKIE", "").strip()
+CONFIG = {
      "max_network_errors": 10,    # 网络错误超限次数
      "request_retries": 5,        # 单接口请求重试次数
      "request_timeout": 20,       # 请求超时时间
@@ -40,26 +40,26 @@ from bs4 import BeautifulSoup
      "min_amount": 10000,         # 最小监控金额（妖晶）- 大于1万
  }
  # 路径常量
- SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
- LOCK_FILE = os.path.join(SCRIPT_PATH, "yaohuo_monitor.lock")
- LOG_FILE = os.path.join(SCRIPT_PATH, "high_value_games.log")
+SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
+LOCK_FILE = os.path.join(SCRIPT_PATH, "yaohuo_monitor.lock")
+LOG_FILE = os.path.join(SCRIPT_PATH, "high_value_games.log")
  # 请求基础域名
- BASE_HOST = "https://yaohuo.me"
- HALL_URL = f"{BASE_HOST}/games/chuiniu/"
- DETAIL_URL = f"{BASE_HOST}/games/chuiniu/book_view.aspx?id="
+BASE_HOST = "https://yaohuo.me"
+HALL_URL = f"{BASE_HOST}/games/chuiniu/"
+DETAIL_URL = f"{BASE_HOST}/games/chuiniu/book_view.aspx?id="
  # ======================================
  # 全局状态
  # ======================================
- class GameState:
+class GameState:
      def __init__(self):
          self.is_running = True
          self.network_error_count = 0
          self.recorded_game_ids = set()  # 已记录的对局ID，避免重复记录
- state = GameState()
+state = GameState()
  # ======================================
  # 请求头
  # ======================================
- REQUEST_HEADERS = {
+REQUEST_HEADERS = {
      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,*/*;q=0.8',
      'Accept-Language': 'zh-CN,zh;q=0.9',
      'Cache-Control': 'max-age=0',
@@ -72,7 +72,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 工具函数
  # ======================================
- def format_money(num):
+def format_money(num):
      """金额格式化：10000 → 1.0万"""
      try:
          n = int(num)
@@ -82,7 +82,7 @@ from bs4 import BeautifulSoup
              return f"{n}"
      except:
          return str(num)
- def extract_number(text):
+def extract_number(text):
      """从文本中提取数字"""
      match = re.search(r'(\d{1,3}(?:,\d{3})*|\d+)', str(text))
      if match:
@@ -91,7 +91,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 彩色日志系统 ZLog
  # ======================================
- class ZLog:
+class ZLog:
      @staticmethod
      def hex_to_rgb(hex_color):
          hex_color = hex_color.lstrip('#')
@@ -121,7 +121,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 大额对局日志文件记录
  # ======================================
- def log_high_value_game(game_info):
+def log_high_value_game(game_info):
      """
      将大额对局记录到日志文件
      格式：[时间] [对局ID] 发起者:XXX | 金额:XXX | 应战者:XXX | 结果:XXX | 状态:XXX
@@ -144,7 +144,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 带重试的网络请求
  # ======================================
- def request_with_retry(url, method="GET", data=None):
+def request_with_retry(url, method="GET", data=None):
      """带重试的HTTP请求，每错一次递增1分钟延迟"""
      retry_max = CONFIG["request_retries"]
      timeout = CONFIG["request_timeout"]
@@ -182,7 +182,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 【新增】从大厅页面获取对局列表
  # ======================================
- def get_hall_games():
+def get_hall_games():
      """
      访问大厅页面，获取所有公开对局
      返回：符合条件(金额>10000)的对局ID列表
@@ -257,7 +257,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 【新增】解析详情页获取完整对局信息
  # ======================================
- def parse_game_detail(game_id):
+def parse_game_detail(game_id):
      """
      访问详情页，解析并返回完整的对局信息
      返回字典包含：id, creator(发起者), amount(金额), acceptor(应战者), result(结果), status(状态)
@@ -349,7 +349,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 控制台打印大额对局信息（彩色高亮）
  # ======================================
- def print_game_info(game_info):
+def print_game_info(game_info):
      """
      控制台彩色打印格式：
      [对局ID] 发起者:XXX | 金额:XXX万 | 应战者:XXX | 结果:XXX
@@ -374,7 +374,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 检测并处理大额对局
  # ======================================
- def check_and_process_games():
+def check_and_process_games():
      """主处理逻辑：获取大厅列表 → 筛选 → 访问详情 → 记录"""
      new_game_count = 0
      
@@ -417,7 +417,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 配置校验
  # ======================================
- def check_config_valid():
+def check_config_valid():
      if not COOKIE:
          ZLog.e("=" * 60)
          ZLog.e("【错误】Cookie为空！")
@@ -439,7 +439,7 @@ from bs4 import BeautifulSoup
  # ======================================
  # 进程锁
  # ======================================
- def is_pid_alive(pid):
+def is_pid_alive(pid):
      try:
          pid = int(pid)
          if os.name == "nt":
@@ -449,7 +449,7 @@ from bs4 import BeautifulSoup
              return True
      except:
          return False
- def lock_script():
+def lock_script():
      if os.path.exists(LOCK_FILE):
          try:
              with open(LOCK_FILE, "r") as f:
@@ -464,7 +464,7 @@ from bs4 import BeautifulSoup
      with open(LOCK_FILE, "w") as f:
          f.write(str(os.getpid()))
      atexit.register(unlock_script)
- def unlock_script():
+def unlock_script():
      try:
          if os.path.exists(LOCK_FILE):
              os.remove(LOCK_FILE)
@@ -473,12 +473,12 @@ from bs4 import BeautifulSoup
  # ======================================
  # 安全退出
  # ======================================
- def safe_exit():
+def safe_exit():
      state.is_running = False
  # ======================================
  # 主入口
  # ======================================
- def main():
+def main():
      ZLog.i("=" * 60)
      ZLog.s("妖火吹牛 - 大额对局监控 V2.0")
      ZLog.i("=" * 60)
@@ -518,5 +518,5 @@ from bs4 import BeautifulSoup
          ZLog.i(f"监控结束，共记录 {len(state.recorded_game_ids)} 个大额对局")
          ZLog.i(f"日志已保存至: {LOG_FILE}")
          ZLog.i("=" * 60)
- if __name__ == "__main__":
+if __name__ == "__main__":
      main()
