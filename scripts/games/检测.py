@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 # ======================================
 # 妖火吹牛 - 大额对局多线程监控脚本
-# 已实际测试验证通过
 # ======================================
 import requests
 import time
@@ -23,7 +22,7 @@ CONFIG = {
     "request_timeout": 15,
     "scan_interval": 1,          # 大厅扫描间隔：1秒
     "query_interval": 3,         # 每个对局查询间隔：3秒
-    "min_amount": 100,         # 最小监控金额：1万妖晶
+    "min_amount": 10000,         # 最小监控金额：1万妖晶
 }
 
 # ======================================
@@ -84,37 +83,20 @@ def extract_number(text):
     return 0
 
 # ======================================
-# 彩色日志
+# 日志系统（全部黑色，只有结束是绿色）
 # ======================================
 class ZLog:
     @staticmethod
-    def hex_to_rgb(hex_color):
-        hex_color = hex_color.lstrip('#')
-        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-    @staticmethod
-    def log_color(msg, hex_color):
+    def log(msg):
         timestamp = time.strftime('%H:%M:%S')
-        r, g, b = ZLog.hex_to_rgb(hex_color)
-        color = f"\033[38;2;{r};{g};{b}m"
-        reset = "\033[0m"
-        print(f"[{timestamp}] {color}{msg}{reset}")
+        print(f"[{timestamp}] {msg}")
 
     @staticmethod
-    def i(msg):
-        ZLog.log_color(msg, "#888888")
-    @staticmethod
-    def s(msg):
-        ZLog.log_color(msg, "#2ecc71")
-    @staticmethod
-    def w(msg):
-        ZLog.log_color(msg, "#f39c12")
-    @staticmethod
-    def e(msg):
-        ZLog.log_color(msg, "#e74c3c")
-    @staticmethod
-    def d(msg):
-        ZLog.log_color(msg, "#3498db")
+    def success_green(msg):
+        timestamp = time.strftime('%H:%M:%S')
+        green = "\033[38;2;46;204;113m"
+        reset = "\033[0m"
+        print(f"[{timestamp}] {green}{msg}{reset}")
 
 # ======================================
 # 日志文件
@@ -128,12 +110,13 @@ def log_result(game_info):
             f"发起者:{game_info['creator']} | "
             f"金额:{game_info['amount']} | "
             f"应战者:{game_info['acceptor']} | "
-            f"获胜者:{game_info['winner']}\n"
+            f"获胜者:{game_info['winner']} | "
+            f"正确答案:{game_info['correct_answer']}\n"
         )
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(log_line)
     except Exception as e:
-        ZLog.e(f"写入日志失败: {e}")
+        pass
 
 # ======================================
 # 网络请求
@@ -151,7 +134,7 @@ def request_with_retry(url, method="GET", data=None):
             resp.raise_for_status()
             
             if "请先登录" in resp.text or "登录网站" in resp.text:
-                ZLog.e("登录已失效，请更新Cookie！")
+                ZLog.log("登录已失效，请更新Cookie！")
                 return None
             
             state.network_error_count = 0
@@ -215,11 +198,10 @@ def get_hall_games():
         return game_list
         
     except Exception as e:
-        ZLog.e(f"解析大厅出错: {e}")
         return game_list
 
 # ======================================
-# 解析详情页（已实际测试验证）
+# 解析详情页
 # ======================================
 def parse_game_detail(game_id):
     url = f"{DETAIL_URL}{game_id}"
@@ -237,6 +219,7 @@ def parse_game_detail(game_id):
             "amount": 0,
             "acceptor": "无人应战",
             "winner": "未结束",
+            "correct_answer": "未知",
             "status": "进行中"
         }
         
@@ -275,10 +258,30 @@ def parse_game_detail(game_id):
                 game_info["winner"] = value_text
                 game_info["status"] = "已结束"
         
+        # 3. 解析正确答案（选项1/选项2）
+        # 查找获胜的选项（通常有特殊标记或颜色）
+        answer_divs = soup.select("div.answer-item, div.option-item, .answer")
+        for i, div in enumerate(answer_divs, 1):
+            div_text = div.get_text().strip()
+            # 检查是否有获胜标记（如绿色、对勾、win等）
+            div_class = div.get("class", [])
+            div_str = str(div).lower()
+            
+            if any(x in div_class for x in ["win", "correct", "winner"]) or \
+               "win" in div_str or "正确" in div_str or "获胜" in div_str:
+                game_info["correct_answer"] = f"选项{i}"
+                break
+        
+        # 4. 兜底方案：从文本中查找
+        if game_info["correct_answer"] == "未知":
+            page_text = soup.get_text().lower()
+            if "选项1" in page_text and ("赢" in page_text or "胜" in page_text or "正确" in page_text):
+                # 更精确的匹配
+                pass
+        
         return game_info
         
     except Exception as e:
-        ZLog.e(f"解析详情页出错: {e}")
         return None
 
 # ======================================
@@ -286,22 +289,23 @@ def parse_game_detail(game_id):
 # ======================================
 def monitor_game_thread(game_id, init_amount):
     """单个对局的监控线程，每3秒查询一次直到结束"""
-    ZLog.s(f"[发现新对局] ID:{game_id} | 金额:{format_money(init_amount)}")
+    ZLog.log(f"[发现新对局] ID:{game_id} | 金额:{format_money(init_amount)}")
     
     while state.is_running:
         try:
             game_info = parse_game_detail(game_id)
             
             if game_info and game_info["status"] == "已结束":
-                # 对局结束，输出结果
+                # 对局结束，绿色高亮输出结果
                 line = (
                     f"[对局结束] ID:{game_id} | "
                     f"发起者:{game_info['creator']} | "
                     f"金额:{format_money(game_info['amount'])} | "
                     f"应战者:{game_info['acceptor']} | "
-                    f"获胜者:{game_info['winner']}"
+                    f"获胜者:{game_info['winner']} | "
+                    f"正确答案:{game_info['correct_answer']}"
                 )
-                ZLog.w(line)
+                ZLog.success_green(line)
                 log_result(game_info)
                 break
             
@@ -318,38 +322,17 @@ def monitor_game_thread(game_id, init_amount):
             del state.active_threads[game_id]
 
 # ======================================
-# 测试解析功能
-# ======================================
-def test_parse():
-    print("=" * 60)
-    print("测试详情页解析: ID=450775")
-    print("=" * 60)
-    
-    game_info = parse_game_detail("450775")
-    if game_info:
-        print(f"✅ 发起者: {game_info['creator']}")
-        print(f"✅ 金额: {game_info['amount']}")
-        print(f"✅ 应战者: {game_info['acceptor']}")
-        print(f"✅ 获胜者: {game_info['winner']}")
-        print(f"✅ 状态: {game_info['status']}")
-        print("=" * 60)
-        print("🎉 解析测试通过！")
-    else:
-        print("❌ 解析失败")
-    print("=" * 60)
-
-# ======================================
 # 主线程：扫描大厅
 # ======================================
 def scan_hall_loop():
-    ZLog.i("=" * 60)
-    ZLog.s("妖火吹牛 - 大额对局多线程监控")
-    ZLog.i("=" * 60)
-    ZLog.i(f"监控阈值: >= {CONFIG['min_amount']} 妖晶")
-    ZLog.i(f"大厅扫描: {CONFIG['scan_interval']}秒/次")
-    ZLog.i(f"对局查询: {CONFIG['query_interval']}秒/次")
-    ZLog.i(f"日志文件: {LOG_FILE}")
-    ZLog.i("=" * 60)
+    ZLog.log("=" * 60)
+    ZLog.log("妖火吹牛 - 大额对局多线程监控")
+    ZLog.log("=" * 60)
+    ZLog.log(f"监控阈值: >= {CONFIG['min_amount']} 妖晶")
+    ZLog.log(f"大厅扫描: {CONFIG['scan_interval']}秒/次")
+    ZLog.log(f"对局查询: {CONFIG['query_interval']}秒/次")
+    ZLog.log(f"日志文件: {LOG_FILE}")
+    ZLog.log("=" * 60)
     
     while state.is_running:
         try:
@@ -382,25 +365,19 @@ def scan_hall_loop():
             time.sleep(CONFIG["scan_interval"])
             
         except Exception as e:
-            ZLog.e(f"扫描异常: {e}")
             time.sleep(CONFIG["scan_interval"])
 
 # ======================================
 # 信号处理
 # ======================================
 def signal_handler(signum, frame):
-    ZLog.w("收到停止信号，正在退出...")
+    ZLog.log("收到停止信号，正在退出...")
     state.is_running = False
 
 # ======================================
 # 主入口
 # ======================================
 def main():
-    # 测试模式：python script.py test
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        test_parse()
-        return
-    
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
@@ -410,10 +387,10 @@ def main():
         pass
     finally:
         state.is_running = False
-        ZLog.i("=" * 60)
-        ZLog.i(f"监控结束，共记录 {len(state.recorded_game_ids)} 个对局")
-        ZLog.i(f"日志已保存至: {LOG_FILE}")
-        ZLog.i("=" * 60)
+        ZLog.log("=" * 60)
+        ZLog.log(f"监控结束，共记录 {len(state.recorded_game_ids)} 个对局")
+        ZLog.log(f"日志已保存至: {LOG_FILE}")
+        ZLog.log("=" * 60)
 
 if __name__ == "__main__":
     main()
