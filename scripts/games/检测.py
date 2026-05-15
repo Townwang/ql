@@ -23,7 +23,7 @@ CONFIG = {
      "request_retries": 5,        # 单接口请求重试次数
      "request_timeout": 20,       # 请求超时时间
      "refresh_interval": 30,      # 刷新间隔（秒）
-     "min_amount": 10000,         # 最小监控金额（妖晶）- 大于1万
+     "min_amount": 1000,         # 最小监控金额（妖晶）- 大于1万
  }
  # 路径常量
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
