@@ -22,7 +22,7 @@ CONFIG = {
     "request_timeout": 15,
     "scan_interval": 1,          # 大厅扫描间隔：1秒
     "query_interval": 3,         # 每个对局查询间隔：3秒
-    "min_amount": 10000,         # 最小监控金额：1万妖晶
+    "min_amount": 100,         # 最小监控金额：1万妖晶
 }
 
 # ======================================
