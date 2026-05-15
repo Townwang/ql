@@ -2,7 +2,7 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛(优化版)
+name: 妖火吹牛
 tag: 游戏,妖火
 instance: single
 
@@ -25,6 +25,7 @@ instance: single
 
 import secrets
 import requests
+import socket
 import time
 import json
 import os
@@ -32,6 +33,7 @@ import re
 import atexit
 import random
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
 
 # ======================================
 # 青龙环境变量
@@ -44,7 +46,7 @@ CONFIG = {
     "max_bet": 509999,        # 单次最大投注
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
-    "request_timeout": 10,     # 请求超时时间(优化：从20改成10，更快超时重试)
+    "request_timeout": 20,     # 请求超时时间
 }
 
 # 路径常量
@@ -59,12 +61,36 @@ API_RECORDS = f"{BASE_HOST}/games/chuiniu/book_list.aspx?type=0"
 API_BET = f"{BASE_HOST}/games/chuiniu/add.aspx"
 
 # ======================================
-# 全局状态(优化新增)
+# TCP连接优化 - Session全局初始化
 # ======================================
-# 1. 复用HTTP连接，减少握手开销
-SESSION = requests.Session()
-# 2. 密码验证标记，避免每次投注都验证
-PASSWORD_VERIFIED = False
+# 创建全局Session实现TCP连接复用 & HTTP Keep-Alive
+session = requests.Session()
+
+# 配置TCP_NODELAY禁用Nagle算法，减少小包延迟
+# 配置连接池大小提升并发性能
+class TCPOptimizedAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        # socket_options: (level, optname, value)
+        # TCP_NODELAY = 1 禁用Nagle算法，立即发送数据
+        kwargs['socket_options'] = [
+            (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
+            (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+        ]
+        return super().init_poolmanager(*args, **kwargs)
+
+# 挂载优化后的适配器
+# pool_connections: 连接池缓存的不同主机连接数
+# pool_maxsize: 每个主机的最大并发连接数
+session.mount('http://', TCPOptimizedAdapter(
+    pool_connections=20,
+    pool_maxsize=50,
+    pool_block=False
+))
+session.mount('https://', TCPOptimizedAdapter(
+    pool_connections=20,
+    pool_maxsize=50,
+    pool_block=False
+))
 
 # ======================================
 # 全局状态
@@ -100,8 +126,6 @@ class GameState:
 
         # 新增：余额不足只提醒一次标记
         self.balance_low_notified = False
-        # 新增：上次余额刷新时间，避免每次都刷新
-        self.last_balance_refresh = 0
 
     @staticmethod
     def get_today():
@@ -110,19 +134,22 @@ class GameState:
 state = GameState()
 
 # ======================================
-# 请求头(优化：绑定到Session)
+# 请求头 - 统一设置到Session中实现复用
 # ======================================
 REQUEST_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
     'Cache-Control': 'max-age=0',
+    'Connection': 'keep-alive',  # 显式启用Keep-Alive
     'Content-Type': 'application/x-www-form-urlencoded',
     'Cookie': COOKIE,
     'Origin': BASE_HOST,
     'Referer': API_BET,
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
 }
-SESSION.headers.update(REQUEST_HEADERS)
+
+# 将headers设置到Session，实现一次设置全局复用
+session.headers.update(REQUEST_HEADERS)
 
 # ======================================
 # 金额格式化
@@ -180,6 +207,14 @@ def get_win_provoke_words():
     return [
         f"😁上局赢了「{nick}」,嘻嘻😁😁"
     ]
+#    return [
+#        "还敢再来送吗？",
+#        "实力碾压，不服继续",
+#        "就这水平还敢应战？",
+#        "继续来，接着赢你",
+#        "拿捏了，敢接招吗？",
+#        "轻松拿下，再来一局？"
+#    ]
 
 # 上一局输了 专用话术
 def get_lose_provoke_words():
@@ -188,6 +223,14 @@ def get_lose_provoke_words():
     return [
         f"🙁可恶的「{nick}」,不嘻嘻🙁🙁"
     ]
+#    return [
+#        "刚才大意了，敢再来吗？",
+ #       "运气而已，这局必翻盘",
+#        "还给我，敢不敢接？",
+#        "上局运气不好，再战一局",
+#        "别得意，这局赢回来",
+#        "翻盘局，敢应战就来"
+#    ]
 
 # 无历史记录 第一次开局 默认话术
 def get_default_provoke_words():
@@ -267,7 +310,6 @@ def refresh_balance():
             if value_span:
                 try:
                     state.current_balance = int(value_span.text.strip().replace(",", ""))
-                    state.last_balance_refresh = time.time()
                     return state.current_balance
                 except:
                     pass
@@ -275,7 +317,6 @@ def refresh_balance():
     if len(values) >= 2:
         try:
             state.current_balance = int(values[1].text.strip().replace(",", ""))
-            state.last_balance_refresh = time.time()
             return state.current_balance
         except:
             pass
@@ -426,6 +467,10 @@ def check_bet_result():
         ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
         ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
+      #  if challenger == "应战" and state.real_bet > 30000:
+      #      ZLog.w("本局挑战者为「应战」，不执行累进规则，保持原投注")
+      #      state.target_bet = state.real_bet
+      #  else:
         state.target_bet = calc_real_bet()
 
     else:
@@ -456,7 +501,7 @@ def check_config_valid():
     return True
 
 # ======================================
-# 【优化】带重试请求：短延迟指数退避 + Session复用
+# 带重试请求 - 使用Session复用TCP连接
 # ======================================
 def request_with_retry(url, method="GET", data=None):
     retry_max = CONFIG["request_retries"]
@@ -465,9 +510,11 @@ def request_with_retry(url, method="GET", data=None):
     for attempt in range(1, retry_max + 1):
         try:
             if method.upper() == "GET":
-                resp = SESSION.get(url, timeout=timeout)
+                # 使用全局Session，不再重复传递headers
+                resp = session.get(url, timeout=timeout)
             else:
-                resp = SESSION.post(url, data=data, timeout=timeout)
+                # 使用全局Session，不再重复传递headers
+                resp = session.post(url, data=data, timeout=timeout)
             resp.raise_for_status()
             
             if "请先登录" in resp.text or "登录网站" in resp.text:
@@ -481,9 +528,9 @@ def request_with_retry(url, method="GET", data=None):
 
         except Exception as e:
             state.network_error_count += 1
-            # 【优化】指数退避：1/2/4/8/10秒，替代原来的分钟级延迟
-            delay_sec = min(2 ** (attempt - 1), 10)
-            ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec}秒后重试")
+            # 每出错一次 延迟 = 错误次数 * 60秒
+            delay_sec = state.network_error_count * 60
+            ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec//60}分钟后重试")
             
             # 错误超限 直接停止
             if state.network_error_count >= CONFIG["max_network_errors"]:
@@ -494,12 +541,9 @@ def request_with_retry(url, method="GET", data=None):
             time.sleep(delay_sec)
 
 # ======================================
-# 【优化】密码验证：只验证一次，避免重复请求
+# 密码验证
 # ======================================
 def verify_password():
-    global PASSWORD_VERIFIED
-    if PASSWORD_VERIFIED:
-        return True  # 已验证过直接跳过
     if not PASSWORD:
         ZLog.e("需要密码才能投注")
         return False
@@ -513,28 +557,22 @@ def verify_password():
     if "needpassword" in resp.text and "请输入密码" in resp.text:
         ZLog.e("密码错误")
         return False
-    PASSWORD_VERIFIED = True
     return True
 
 # ======================================
-# 【优化】投注发起：减少重复请求
+# 投注发起
 # ======================================
 def send_bet():
-    global PASSWORD_VERIFIED
     if not state.user_id:
         return False
     bet_amount = state.real_bet
-    
-    # 【优化】只在余额为0或超过5分钟没刷新时才刷新余额
-    if state.current_balance == 0 or (time.time() - state.last_balance_refresh) > 300:
-        refresh_balance()
-        
+    refresh_balance()
     if state.current_balance < bet_amount:
         # 只提醒一次
         if not state.balance_low_notified:
             ZLog.e(f"余额不足 {format_money(state.current_balance)} < {format_money(bet_amount)}")
             state.balance_low_notified = True
-        time.sleep(2)  # 【优化】从10秒改成2秒，更快重试
+        time.sleep(10)
         return False
     # 余额足够时重置提醒标记
     state.balance_low_notified = False
@@ -557,37 +595,36 @@ def send_bet():
     }
     resp = request_with_retry(API_BET, "POST", post_data)
     if not resp:
-        PASSWORD_VERIFIED = False  # 投注失败可能密码失效，下次重新验证
         return False
+    records = parse_game_records(get_game_record_html() or "")
+    if records:
+        state.last_bet_id = records[0]["id"]
     state.total_bet_amount += bet_amount
     ZLog.d(f"投 {format_money(bet_amount)} 选 {str(choose)}")
     return True
 
 # ======================================
-# 【优化】等待结果：增加超时 + 合理轮询间隔
+# 等待结果
 # ======================================
 def wait_result():
-    max_wait = 30  # 最多等30秒，避免无限卡住
-    start_time = time.time()
-    while state.is_running and (time.time() - start_time) < max_wait:
+    while state.is_running:
         res = check_bet_result()
         if res is not None:
             return True
-        time.sleep(0.5)  # 【优化】0.5秒轮询，平衡速度和请求频率
-    ZLog.w("等待结果超时，继续下一轮")
-    return False
+#        time.sleep(1)
 
 # ======================================
-# 【优化】轮次延迟：取消分钟级长延迟，改用短随机延迟
+# 延迟
 # ======================================
 def round_delay():
-    # 随机0.5-2秒延迟，避免被检测
-    delay_sec = random.uniform(0.5, 2)
-    # 连败超过10次最多延迟5秒，替代原来的分钟级延迟
-    if state.consecutive_losses >= 10:
-        delay_sec = random.uniform(2, 5)
-    ZLog.d(f"延迟 {delay_sec:.1f} 秒后开始下一轮...")
-    time.sleep(delay_sec)
+    if state.last_result == "win":
+        return
+    if state.consecutive_losses < 10:
+        return
+    minutes = state.consecutive_losses
+    seconds = minutes * 60
+    ZLog.d(f"{minutes} 分后开始...")
+    time.sleep(seconds)
 
 # ======================================
 # 进程锁
@@ -685,13 +722,15 @@ def load_game_state():
 # ======================================
 def safe_exit():
     state.is_running = False
+    # 关闭Session释放连接
+    session.close()
 
 # ======================================
 # 主入口
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛(极速优化版)")
+    ZLog.i("妖火吹牛 - TCP连接优化版")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -723,7 +762,7 @@ def main():
                 state.total_runs += 1
             
             if not ongoing and not state.last_bet_id:
-                time.sleep(0.1)  # 【优化】空闲等待从1秒改成0.1秒
+                time.sleep(0.5)
 
     except KeyboardInterrupt:
         ZLog.w("用户手动停止")
