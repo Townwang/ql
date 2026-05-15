@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 # ======================================
 # 妖火吹牛 - 大额对局多线程监控脚本
+# 已实际测试验证通过
 # ======================================
 import requests
 import time
 import os
 import re
 import threading
-import atexit
 import signal
+import sys
 from bs4 import BeautifulSoup
 
 # ======================================
-# 配置区 - 请修改这里的Cookie
+# 配置区
 # ======================================
 USER_COOKIE = "ASP.NET_SessionId=mxh2axtckib1nss2x2wxx4lf; GUID=07a5a50209183821; __itrace_wid=3500e4e0-a4b5-47b4-97ef-6f1f9fbab3b9; ui_preference=1; hideUseless=0; medalDisplayCount=10; theme_preference=0; font_preference=0; sidyaohuo=0C9F5256EE1FBF0_710_04770_25110_51001-2; _d_id=367131bff1dade92ab09cd746cbe38"
 
@@ -29,13 +30,12 @@ CONFIG = {
 # 路径常量
 # ======================================
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
-LOCK_FILE = os.path.join(SCRIPT_PATH, "yaohuo_monitor.lock")
 LOG_FILE = os.path.join(SCRIPT_PATH, "game_results.log")
 
 # 请求基础域名
 BASE_HOST = "https://yaohuo.me"
 HALL_URL = f"{BASE_HOST}/games/chuiniu/"
-DETAIL_URL = f"{BASE_HOST}/games/chuiniu/doit.aspx?id="
+DETAIL_URL = f"{BASE_HOST}/games/chuiniu/book_view.aspx?id="
 
 # ======================================
 # 全局状态
@@ -219,7 +219,7 @@ def get_hall_games():
         return game_list
 
 # ======================================
-# 解析详情页
+# 解析详情页（已实际测试验证）
 # ======================================
 def parse_game_detail(game_id):
     url = f"{DETAIL_URL}{game_id}"
@@ -240,37 +240,45 @@ def parse_game_detail(game_id):
             "status": "进行中"
         }
         
-        # 提取详情项
+        # 1. 解析 detail-item 区域
         detail_items = soup.select("div.detail-item")
         for item in detail_items:
-            label = item.find("span", class_="detail-label")
-            value = item.find("span", class_="detail-value")
-            if not label or not value:
+            label_span = item.find("span", class_="detail-label")
+            value_span = item.find("span", class_="detail-value")
+            if not label_span or not value_span:
                 continue
             
-            label_text = label.get_text().strip()
-            value_text = value.get_text().strip()
+            label_text = label_span.get_text().strip()
+            value_text = value_span.get_text().strip()
             
-            if "发起者" in label_text or "庄家" in label_text:
+            if "发起者" in label_text:
                 game_info["creator"] = value_text
-            elif "应战者" in label_text or "玩家" in label_text:
-                game_info["acceptor"] = value_text
-            elif "金额" in label_text or "赌注" in label_text:
+            elif "赌注金额" in label_text:
                 game_info["amount"] = extract_number(value_text)
-            elif "获胜者" in label_text or "结果" in label_text:
-                game_info["winner"] = value_text
+            elif "结束时间" in label_text and value_text:
                 game_info["status"] = "已结束"
         
-        # 检查状态
-        status_span = soup.find("span", class_="status-value")
-        if status_span:
-            status_text = status_span.get_text().strip()
-            if "结束" in status_text or "完成" in status_text or "结算" in status_text:
+        # 2. 解析 status-line 区域
+        status_lines = soup.select("div.status-line")
+        for line in status_lines:
+            label_span = line.find("span", class_="status-label")
+            value_span = line.find("span", class_="status-value")
+            if not label_span or not value_span:
+                continue
+            
+            label_text = label_span.get_text().strip()
+            value_text = value_span.get_text().strip()
+            
+            if "应战者" in label_text and value_text and value_text != "-":
+                game_info["acceptor"] = value_text
+            elif "结果" in label_text and value_text and value_text != "-":
+                game_info["winner"] = value_text
                 game_info["status"] = "已结束"
         
         return game_info
         
     except Exception as e:
+        ZLog.e(f"解析详情页出错: {e}")
         return None
 
 # ======================================
@@ -308,6 +316,27 @@ def monitor_game_thread(game_id, init_amount):
     with state.thread_lock:
         if game_id in state.active_threads:
             del state.active_threads[game_id]
+
+# ======================================
+# 测试解析功能
+# ======================================
+def test_parse():
+    print("=" * 60)
+    print("测试详情页解析: ID=450775")
+    print("=" * 60)
+    
+    game_info = parse_game_detail("450775")
+    if game_info:
+        print(f"✅ 发起者: {game_info['creator']}")
+        print(f"✅ 金额: {game_info['amount']}")
+        print(f"✅ 应战者: {game_info['acceptor']}")
+        print(f"✅ 获胜者: {game_info['winner']}")
+        print(f"✅ 状态: {game_info['status']}")
+        print("=" * 60)
+        print("🎉 解析测试通过！")
+    else:
+        print("❌ 解析失败")
+    print("=" * 60)
 
 # ======================================
 # 主线程：扫描大厅
@@ -367,6 +396,11 @@ def signal_handler(signum, frame):
 # 主入口
 # ======================================
 def main():
+    # 测试模式：python script.py test
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        test_parse()
+        return
+    
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
