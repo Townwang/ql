@@ -4,28 +4,30 @@
  # 【重要提示】必须配置有效的Cookie才能正常运行！
  # ======================================
  # 添加任务
- """
+ 
+ 
+"""
  name: 妖火吹牛-大额对局监控V2
  tag: 游戏,妖火,监控
  instance: single
- """
+"""
  # 变量声明
- """
+"""
  @env YH_COOKIE= 妖火Cookie（必填！登录后从浏览器获取）
- """
+"""
  # 依赖声明
- """
+"""
  @pip requests
  @pip bs4
  @pip beautifulsoup4
- """
+"""
  # ======================================
- import requests
- import time
- import os
- import re
- import atexit
- from bs4 import BeautifulSoup
+import requests
+import time
+import os
+import re
+import atexit
+from bs4 import BeautifulSoup
  # ======================================
  # 青龙环境变量 - 【必须配置Cookie！】
  # ======================================
