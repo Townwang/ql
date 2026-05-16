@@ -608,7 +608,7 @@ def send_bet():
 # ======================================
 def wait_result():
     poll_delay = 0  # 第一次轮询延迟0秒（立即检查）
-    max_delay = 5   # 最多5秒
+    max_delay = 3   # 最多3秒
     while state.is_running:
         if poll_delay > 0:
             time.sleep(poll_delay)
@@ -616,8 +616,8 @@ def wait_result():
         res = check_bet_result()
         if res is not None:
             return True
-        # 渐进式增加延迟：0 → 0.1 → 0.2 → ... 最多5秒
-        poll_delay = min(poll_delay + 0.1, max_delay)
+        # 渐进式增加延迟：0 → 0.01 → 0.02 → ... 最多3秒
+        poll_delay = min(poll_delay + 0.01, max_delay)
 
 # ======================================
 # 延迟
