@@ -42,7 +42,7 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 999,           # 基础投注
+    "base_bet": 300,           # 基础投注
     "max_bet": 130000,        # 单次最大投注
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
@@ -608,7 +608,7 @@ def send_bet():
 # ======================================
 def wait_result():
     poll_delay = 0  # 第一次轮询延迟0秒（立即检查）
-    max_delay = 3   # 最多3秒
+    max_delay = 2   # 最多3秒
     while state.is_running:
         if poll_delay > 0:
             time.sleep(poll_delay)
