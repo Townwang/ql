@@ -205,7 +205,7 @@ def get_win_provoke_words():
     # 用上一局挑战者，没有就默认陌生人
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
     return [
-        f"😁上局赢了「{nick}」,嘻嘻😁"
+        f"🐮🐮🐮🐮🐮🐮🐮"
     ]
 #    return [
 #        "还敢再来送吗？",
@@ -221,7 +221,7 @@ def get_lose_provoke_words():
     # 用上一局挑战者，没有就默认陌生人
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
     return [
-        f"🙁可恶的「{nick}」,不嘻嘻🙁"
+        f"🙁☹️☹️☹️☹️☹️☹️"
     ]
 #    return [
 #        "刚才大意了，敢再来吗？",
