@@ -42,7 +42,7 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 300,           # 基础投注
+    "base_bet": 1000,           # 基础投注
     "max_bet": 130000,        # 单次最大投注
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
@@ -221,7 +221,7 @@ def get_lose_provoke_words():
     # 用上一局挑战者，没有就默认陌生人
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
     return [
-        f"🙁☹️☹️☹️☹️☹️☹️"
+        f"🐶🐶🐶🐶🐶🐶"
     ]
 #    return [
 #        "刚才大意了，敢再来吗？",
@@ -407,7 +407,7 @@ def choose_bet_answer():
     return ans
 
 # ======================================
-# 胜负结算
+# 胜负结算【已修改需求1：达到max_bet输赢全部重置基础投注】
 # ======================================
 def check_bet_result():
     html = get_game_record_html()
@@ -443,18 +443,26 @@ def check_bet_result():
     state.current_challenger = challenger
 
     ZLog.i(f"挑战者: {challenger}")
+    # 标记本局是否为封顶投注
+    is_max_bet_round = (state.real_bet == CONFIG["max_bet"])
+
     if result == "win":
         state.win_count += 1
         state.consecutive_losses = 0
         state.total_profit += amount
         state.last_result = "win"
-        # 赢局重置
-        state.total_lose_sum = 0
-        state.target_bet = state.base_bet
         # 赢钱后重置余额不足提醒
         state.balance_low_notified = False
         refresh_balance()
         ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
+        # =========需求1：达到最大投注，赢了强制重置基础投注=========
+        if is_max_bet_round:
+            ZLog.w(f"本局已触达最大投注{format_money(CONFIG['max_bet'])}，下局重置为基础投注{format_money(CONFIG['base_bet'])}")
+            state.total_lose_sum = 0
+            state.target_bet = state.base_bet
+        else:
+            state.total_lose_sum = 0
+            state.target_bet = state.base_bet
 
     elif result == "lose":
         state.loss_count += 1
@@ -466,12 +474,13 @@ def check_bet_result():
         refresh_balance()
         ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
         ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
-        
-      #  if challenger == "应战" and state.real_bet > 30000:
-      #      ZLog.w("本局挑战者为「应战」，不执行累进规则，保持原投注")
-      #      state.target_bet = state.real_bet
-      #  else:
-        state.target_bet = calc_real_bet()
+        # =========需求1：达到最大投注，输了也强制重置基础投注=========
+        if is_max_bet_round:
+            ZLog.w(f"本局已触达最大投注{format_money(CONFIG['max_bet'])}，下局重置为基础投注{format_money(CONFIG['base_bet'])}")
+            state.total_lose_sum = 0
+            state.target_bet = state.base_bet
+        else:
+            state.target_bet = calc_real_bet()
 
     else:
         state.last_bet_id = None
@@ -732,7 +741,7 @@ def safe_exit():
     session.close()
 
 # ======================================
-# 主入口
+# 主入口【已修改需求2：投注超上限跳过等待开奖】
 # ======================================
 def main():
     ZLog.i("=" * 20)
@@ -762,10 +771,23 @@ def main():
                 wait_result()
                 round_delay()
             else:
+                # 需求2：预计算下一轮投注，若等于max_bet，投注成功后跳过wait_result
+                next_calc_bet = calc_real_bet()
                 if send_bet():
-                    wait_result()
-                    round_delay()
-                state.total_runs += 1
+                    # 判断当前投注是否已经封顶最大值
+                    if state.real_bet >= CONFIG["max_bet"]:
+                        ZLog.w(f"投注已达到上限{format_money(CONFIG['max_bet'])}，跳过等待结果，直接开启下一局")
+                        # 封顶后手动重置数据，不用等结算
+                        state.total_lose_sum = 0
+                        state.target_bet = CONFIG["base_bet"]
+                        state.real_bet = CONFIG["base_bet"]
+                        state.last_bet_id = None
+                        state.last_result = None
+                        save_game_state()
+                    else:
+                        wait_result()
+                        round_delay()
+                    state.total_runs += 1
             
             if not ongoing and not state.last_bet_id:
                 time.sleep(0.5)
