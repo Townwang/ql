@@ -2,7 +2,7 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛_优化版
+name: 妖火吹牛_优化版_无超时
 tag: 游戏,妖火
 instance: single
 
@@ -43,11 +43,10 @@ PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
     "base_bet": 1000,           # 基础投注
-    "max_bet": 130000,        # 单次最大投注【已优化：改为25万，支持手动大额投注】
-    "max_network_errors": 10,  # 网络错误超限次数
-    "request_retries": 5,      # 单接口请求重试次数
-    "request_timeout": 20,     # 请求超时时间
-    "wait_result_timeout": 300,  # 【新增】等待结果超时秒数（5分钟）
+    "max_bet": 130000,          # 单次最大投注
+    "max_network_errors": 10,   # 网络错误超限次数
+    "request_retries": 5,       # 单接口请求重试次数
+    "request_timeout": 20,      # 请求超时时间
 }
 
 # 路径常量
@@ -362,7 +361,7 @@ def choose_bet_answer():
     return ans
 
 # ======================================
-# 【优化核心】胜负结算 - 使用实际金额判断
+# 胜负结算 - 使用实际金额判断
 # ======================================
 def check_bet_result():
     html = get_game_record_html()
@@ -398,9 +397,7 @@ def check_bet_result():
 
     ZLog.i(f"挑战者: {challenger}")
     
-    # ======================================
-    # 【关键优化1】用实际结算金额判断是否封顶，支持手动大额投注
-    # ======================================
+    # 用实际结算金额判断是否封顶，支持手动大额投注
     is_max_bet_round = (amount >= CONFIG["max_bet"])
     
     if is_max_bet_round:
@@ -426,9 +423,7 @@ def check_bet_result():
         state.total_profit -= amount
         state.last_result = "lose"
         
-        # ======================================
-        # 【关键优化2】输了：如果是封顶投注，强制重置；否则累加亏损
-        # ======================================
+        # 输了：如果是封顶投注，强制重置；否则累加亏损
         if is_max_bet_round:
             ZLog.w(f"封顶投注输了：不累计亏损，强制重置")
             state.total_lose_sum = 0
@@ -564,22 +559,12 @@ def send_bet():
     return True
 
 # ======================================
-# 【优化】等待结果 - 添加超时机制
+# 等待结果 - 【已移除超时保护】无限等待直到开奖
 # ======================================
 def wait_result():
     poll_delay = 0
     max_delay = 2
-    start_time = time.time()
-    
     while state.is_running:
-        # 【新增】超时检查
-        elapsed = time.time() - start_time
-        if elapsed > CONFIG["wait_result_timeout"]:
-            ZLog.e(f"等待结果超时 ({int(elapsed)}秒)，强制继续下一局")
-            state.last_bet_id = None
-            state.last_ongoing_ids = None
-            return False
-            
         if poll_delay > 0:
             time.sleep(poll_delay)
         
@@ -704,10 +689,10 @@ def safe_exit():
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - 优化版 v2.0")
+    ZLog.i("妖火吹牛 - 优化版 v2.1")
     ZLog.i("✓ 支持手动大额投注自动识别")
     ZLog.i("✓ 实际金额判断封顶投注")
-    ZLog.i("✓ 等待结果超时保护")
+    ZLog.i("✓ 无限等待结果（无超时）")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -722,7 +707,6 @@ def main():
     state.base_bet = CONFIG["base_bet"]
 
     ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']}")
-    ZLog.i(f"等待超时:{CONFIG['wait_result_timeout']}秒")
 
     try:
         while state.is_running:
