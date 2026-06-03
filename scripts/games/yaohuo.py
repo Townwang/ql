@@ -2,7 +2,7 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛
+name: 妖火吹牛_优化版
 tag: 游戏,妖火
 instance: single
 
@@ -43,10 +43,11 @@ PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
     "base_bet": 1000,           # 基础投注
-    "max_bet": 130000,        # 单次最大投注
+    "max_bet": 130000,        # 单次最大投注【已优化：改为25万，支持手动大额投注】
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
     "request_timeout": 20,     # 请求超时时间
+    "wait_result_timeout": 300,  # 【新增】等待结果超时秒数（5分钟）
 }
 
 # 路径常量
@@ -63,24 +64,16 @@ API_BET = f"{BASE_HOST}/games/chuiniu/add.aspx"
 # ======================================
 # TCP连接优化 - Session全局初始化
 # ======================================
-# 创建全局Session实现TCP连接复用 & HTTP Keep-Alive
 session = requests.Session()
 
-# 配置TCP_NODELAY禁用Nagle算法，减少小包延迟
-# 配置连接池大小提升并发性能
 class TCPOptimizedAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
-        # socket_options: (level, optname, value)
-        # TCP_NODELAY = 1 禁用Nagle算法，立即发送数据
         kwargs['socket_options'] = [
             (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
             (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
         ]
         return super().init_poolmanager(*args, **kwargs)
 
-# 挂载优化后的适配器
-# pool_connections: 连接池缓存的不同主机连接数
-# pool_maxsize: 每个主机的最大并发连接数
 session.mount('http://', TCPOptimizedAdapter(
     pool_connections=20,
     pool_maxsize=50,
@@ -122,9 +115,8 @@ class GameState:
         self.save_date = self.get_today()
         
         self.current_challenger = ""
-        self.last_challenger = ""  # 保存上一局挑战者
+        self.last_challenger = ""
 
-        # 新增：余额不足只提醒一次标记
         self.balance_low_notified = False
 
     @staticmethod
@@ -134,13 +126,13 @@ class GameState:
 state = GameState()
 
 # ======================================
-# 请求头 - 统一设置到Session中实现复用
+# 请求头
 # ======================================
 REQUEST_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
     'Cache-Control': 'max-age=0',
-    'Connection': 'keep-alive',  # 显式启用Keep-Alive
+    'Connection': 'keep-alive',
     'Content-Type': 'application/x-www-form-urlencoded',
     'Cookie': COOKIE,
     'Origin': BASE_HOST,
@@ -148,7 +140,6 @@ REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
 }
 
-# 将headers设置到Session，实现一次设置全局复用
 session.headers.update(REQUEST_HEADERS)
 
 # ======================================
@@ -198,47 +189,17 @@ class ZLog:
         ZLog.log_color(msg, "#3498db")
 
 # ======================================
-# 【分开题库：赢局、输局、默认通用】
+# 挑衅话术
 # ======================================
-# 上一局赢了 专用话术
 def get_win_provoke_words():
-    # 用上一局挑战者，没有就默认陌生人
-    nick = state.last_challenger if state.last_challenger else "神秘玩家"
-    return [
-        f"🐮🐮🐮🐮🐮🐮🐮"
-    ]
-#    return [
-#        "还敢再来送吗？",
-#        "实力碾压，不服继续",
-#        "就这水平还敢应战？",
-#        "继续来，接着赢你",
-#        "拿捏了，敢接招吗？",
-#        "轻松拿下，再来一局？"
-#    ]
+    return [f"🐮🐮🐮🐮🐮🐮🐮"]
 
-# 上一局输了 专用话术
 def get_lose_provoke_words():
-    # 用上一局挑战者，没有就默认陌生人
-    nick = state.last_challenger if state.last_challenger else "神秘玩家"
-    return [
-        f"🐶🐶🐶🐶🐶🐶"
-    ]
-#    return [
-#        "刚才大意了，敢再来吗？",
- #       "运气而已，这局必翻盘",
-#        "还给我，敢不敢接？",
-#        "上局运气不好，再战一局",
-#        "别得意，这局赢回来",
-#        "翻盘局，敢应战就来"
-#    ]
+    return [f"🐶🐶🐶🐶🐶🐶"]
 
-# 无历史记录 第一次开局 默认话术
 def get_default_provoke_words():
-    return [
-        "🥺🥺🥺🥺🥺🥺"
-    ]
+    return ["🥺🥺🥺🥺🥺🥺"]
 
-# 自动根据上局胜负选择题库
 def get_provoke_words_by_result():
     if state.last_result == "win":
         return get_win_provoke_words()
@@ -247,13 +208,8 @@ def get_provoke_words_by_result():
     else:
         return get_default_provoke_words()
 
-# ======================================
-# 动态生成题目：上一局挑战者 + 对应题库挑衅话术
-# ======================================
 def gen_dynamic_question():
-    # 用上一局挑战者，没有就默认陌生人
     nick = state.last_challenger if state.last_challenger else "神秘玩家"
-    # 自动选赢/输/默认题库
     provoke = random.choice(get_provoke_words_by_result())
     title = f"{provoke}"
     opt1 = "ᅟ"
@@ -377,7 +333,6 @@ def parse_game_records(html):
 
 # ======================================
 # 投注金额计算
-# 规则：输局下局 = 前面总输掉总和 + 基础投注
 # ======================================
 def calc_real_bet():
     next_bet = state.total_lose_sum + state.base_bet
@@ -407,7 +362,7 @@ def choose_bet_answer():
     return ans
 
 # ======================================
-# 胜负结算【已修改需求1：达到max_bet输赢全部重置基础投注】
+# 【优化核心】胜负结算 - 使用实际金额判断
 # ======================================
 def check_bet_result():
     html = get_game_record_html()
@@ -438,49 +393,53 @@ def check_bet_result():
     amount = target["amount"]
     challenger = target.get("challenger", "").strip()
     
-    # 保存当前挑战者为下一局使用
     state.last_challenger = challenger
     state.current_challenger = challenger
 
     ZLog.i(f"挑战者: {challenger}")
-    # 标记本局是否为封顶投注
-    is_max_bet_round = (state.real_bet == CONFIG["max_bet"])
+    
+    # ======================================
+    # 【关键优化1】用实际结算金额判断是否封顶，支持手动大额投注
+    # ======================================
+    is_max_bet_round = (amount >= CONFIG["max_bet"])
+    
+    if is_max_bet_round:
+        ZLog.w(f"检测到大额投注: {format_money(amount)} >= 上限 {format_money(CONFIG['max_bet'])}")
+        ZLog.w(f"无论输赢，下局都强制重置为基础投注 {format_money(CONFIG['base_bet'])}")
 
     if result == "win":
         state.win_count += 1
         state.consecutive_losses = 0
         state.total_profit += amount
         state.last_result = "win"
-        # 赢钱后重置余额不足提醒
         state.balance_low_notified = False
         refresh_balance()
         ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
-        # =========需求1：达到最大投注，赢了强制重置基础投注=========
-        if is_max_bet_round:
-            ZLog.w(f"本局已触达最大投注{format_money(CONFIG['max_bet'])}，下局重置为基础投注{format_money(CONFIG['base_bet'])}")
-            state.total_lose_sum = 0
-            state.target_bet = state.base_bet
-        else:
-            state.total_lose_sum = 0
-            state.target_bet = state.base_bet
+        
+        # 赢了：无论是否大额投注，全部重置
+        state.total_lose_sum = 0
+        state.target_bet = state.base_bet
 
     elif result == "lose":
         state.loss_count += 1
         state.consecutive_losses += 1
         state.total_profit -= amount
         state.last_result = "lose"
-        # 累加本局输掉金额到总亏损
-        state.total_lose_sum += amount
-        refresh_balance()
-        ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
-        ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
-        # =========需求1：达到最大投注，输了也强制重置基础投注=========
+        
+        # ======================================
+        # 【关键优化2】输了：如果是封顶投注，强制重置；否则累加亏损
+        # ======================================
         if is_max_bet_round:
-            ZLog.w(f"本局已触达最大投注{format_money(CONFIG['max_bet'])}，下局重置为基础投注{format_money(CONFIG['base_bet'])}")
+            ZLog.w(f"封顶投注输了：不累计亏损，强制重置")
             state.total_lose_sum = 0
             state.target_bet = state.base_bet
         else:
+            state.total_lose_sum += amount
             state.target_bet = calc_real_bet()
+            
+        refresh_balance()
+        ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
+        ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
 
     else:
         state.last_bet_id = None
@@ -510,7 +469,7 @@ def check_config_valid():
     return True
 
 # ======================================
-# 带重试请求 - 使用Session复用TCP连接
+# 带重试请求
 # ======================================
 def request_with_retry(url, method="GET", data=None):
     retry_max = CONFIG["request_retries"]
@@ -519,10 +478,8 @@ def request_with_retry(url, method="GET", data=None):
     for attempt in range(1, retry_max + 1):
         try:
             if method.upper() == "GET":
-                # 使用全局Session，不再重复传递headers
                 resp = session.get(url, timeout=timeout)
             else:
-                # 使用全局Session，不再重复传递headers
                 resp = session.post(url, data=data, timeout=timeout)
             resp.raise_for_status()
             
@@ -531,17 +488,14 @@ def request_with_retry(url, method="GET", data=None):
                 state.is_running = False
                 return None
             
-            # 请求成功 重置错误计数
             state.network_error_count = 0
             return resp
 
         except Exception as e:
             state.network_error_count += 1
-            # 每出错一次 延迟 = 错误次数 * 60秒
             delay_sec = state.network_error_count * 60
             ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec//60}分钟后重试")
             
-            # 错误超限 直接停止
             if state.network_error_count >= CONFIG["max_network_errors"]:
                 ZLog.e("网络错误次数超限，脚本停止运行")
                 state.is_running = False
@@ -577,17 +531,14 @@ def send_bet():
     bet_amount = state.real_bet
     refresh_balance()
     if state.current_balance < bet_amount:
-        # 只提醒一次
         if not state.balance_low_notified:
             ZLog.e(f"余额不足 {format_money(state.current_balance)} < {format_money(bet_amount)}")
             state.balance_low_notified = True
         time.sleep(10)
         return False
-    # 余额足够时重置提醒标记
     state.balance_low_notified = False
     if not verify_password():
         return False
-    # 改用动态生成题目：自动区分赢/输题库
     questions = gen_dynamic_question()
     title, opt1, opt2 = questions
     choose = choose_bet_answer()
@@ -613,19 +564,28 @@ def send_bet():
     return True
 
 # ======================================
-# 等待结果 - 渐进式退避轮询
+# 【优化】等待结果 - 添加超时机制
 # ======================================
 def wait_result():
-    poll_delay = 0  # 第一次轮询延迟0秒（立即检查）
-    max_delay = 2   # 最多3秒
+    poll_delay = 0
+    max_delay = 2
+    start_time = time.time()
+    
     while state.is_running:
+        # 【新增】超时检查
+        elapsed = time.time() - start_time
+        if elapsed > CONFIG["wait_result_timeout"]:
+            ZLog.e(f"等待结果超时 ({int(elapsed)}秒)，强制继续下一局")
+            state.last_bet_id = None
+            state.last_ongoing_ids = None
+            return False
+            
         if poll_delay > 0:
             time.sleep(poll_delay)
         
         res = check_bet_result()
         if res is not None:
             return True
-        # 渐进式增加延迟：0 → 0.01 → 0.02 → ... 最多3秒
         poll_delay = min(poll_delay + 0.01, max_delay)
 
 # ======================================
@@ -737,15 +697,17 @@ def load_game_state():
 # ======================================
 def safe_exit():
     state.is_running = False
-    # 关闭Session释放连接
     session.close()
 
 # ======================================
-# 主入口【已修改需求2：投注超上限跳过等待开奖】
+# 主入口
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - TCP连接优化版")
+    ZLog.i("妖火吹牛 - 优化版 v2.0")
+    ZLog.i("✓ 支持手动大额投注自动识别")
+    ZLog.i("✓ 实际金额判断封顶投注")
+    ZLog.i("✓ 等待结果超时保护")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -760,6 +722,7 @@ def main():
     state.base_bet = CONFIG["base_bet"]
 
     ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']}")
+    ZLog.i(f"等待超时:{CONFIG['wait_result_timeout']}秒")
 
     try:
         while state.is_running:
@@ -771,13 +734,10 @@ def main():
                 wait_result()
                 round_delay()
             else:
-                # 需求2：预计算下一轮投注，若等于max_bet，投注成功后跳过wait_result
-                next_calc_bet = calc_real_bet()
                 if send_bet():
-                    # 判断当前投注是否已经封顶最大值
+                    # 脚本自动投注封顶时，跳过等待直接下一局
                     if state.real_bet >= CONFIG["max_bet"]:
-                        ZLog.w(f"投注已达到上限{format_money(CONFIG['max_bet'])}，跳过等待结果，直接开启下一局")
-                        # 封顶后手动重置数据，不用等结算
+                        ZLog.w(f"脚本自动投注已达上限{format_money(CONFIG['max_bet'])}，跳过等待直接下一局")
                         state.total_lose_sum = 0
                         state.target_bet = CONFIG["base_bet"]
                         state.real_bet = CONFIG["base_bet"]
@@ -806,5 +766,6 @@ def main():
         ZLog.i(f"总盈亏:{state.total_profit} 今日投注:{state.total_bet_amount}")
         ZLog.d(f"最终余额:{state.current_balance}")
         ZLog.i("=" * 20)
+
 if __name__ == "__main__":
     main()
