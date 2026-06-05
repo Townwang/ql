@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Set
 from requests.adapters import HTTPAdapter
 
 # ======================================
-# 精简彩色日志
+# 精简彩色日志 - 使用脚本原定义的hex颜色
 # ======================================
 class ZLog:
     @staticmethod
@@ -43,25 +43,47 @@ class ZLog:
         return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
     @staticmethod
-    def log_color(msg, hex_color):
-        timestamp = time.strftime('%H:%M:%S')
+    def color_part(text, hex_color):
+        """返回带颜色的文本片段"""
         r, g, b = ZLog.hex_to_rgb(hex_color)
         color = f"\033[38;2;{r};{g};{b}m"
         reset = "\033[0m"
-        print(f"[{timestamp}] {color}{msg}{reset}")
+        return f"{color}{text}{reset}"
 
+    # 原定义的颜色
     @staticmethod
     def s(msg):
-        ZLog.log_color(msg, "#2ecc71")
+        r, g, b = ZLog.hex_to_rgb("#2ecc71")
+        color = f"\033[38;2;{r};{g};{b}m"
+        reset = "\033[0m"
+        print(f"{color}{msg}{reset}")
     @staticmethod
     def w(msg):
-        ZLog.log_color(msg, "#f39c12")
+        r, g, b = ZLog.hex_to_rgb("#f39c12")
+        color = f"\033[38;2;{r};{g};{b}m"
+        reset = "\033[0m"
+        print(f"{color}{msg}{reset}")
     @staticmethod
     def e(msg):
-        ZLog.log_color(msg, "#e74c3c")
+        r, g, b = ZLog.hex_to_rgb("#e74c3c")
+        color = f"\033[38;2;{r};{g};{b}m"
+        reset = "\033[0m"
+        print(f"{color}{msg}{reset}")
     @staticmethod
     def d(msg):
-        ZLog.log_color(msg, "#3498db")
+        r, g, b = ZLog.hex_to_rgb("#3498db")
+        color = f"\033[38;2;{r};{g};{b}m"
+        reset = "\033[0m"
+        print(f"{color}{msg}{reset}")
+
+# 颜色定义（使用脚本原定义的hex）
+COLORS = {
+    'blue': '#3498db',      # 蓝色 - 发起者、应战者、金额
+    'green': '#2ecc71',     # 绿色 - 赢字
+    'red': '#e74c3c',       # 红色 - 输字
+    'black': '#000000',     # 黑色 - 结果
+    'white': '#ffffff',     # 白色 - 分隔符
+}
 
 # ======================================
 # 配置
@@ -157,7 +179,7 @@ def verify_password():
     return True
 
 # ======================================
-# 极速静默监控类 - 已修复应战者解析
+# 极速静默监控类 - 无时间戳版本
 # ======================================
 class YaohuoSpeedMonitor:
     def __init__(self):
@@ -188,7 +210,7 @@ class YaohuoSpeedMonitor:
             soup = BeautifulSoup(resp.text, 'html.parser')
             res = {'id': bid, '发起者': '未知', '应战者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中', '选择': '未知'}
             
-            # ========== 第一步: 从detail-item中解析发起者和赌注 ==========
+            # 从detail-item中解析发起者和赌注
             for item in soup.find_all('div', class_='detail-item'):
                 lb = item.find('span', class_='detail-label')
                 val = item.find('span', class_='detail-value')
@@ -200,14 +222,13 @@ class YaohuoSpeedMonitor:
                     elif '赌注金额' in t:
                         res['赌注'] = v
             
-            # ========== 修复: 应战者不在detail-item中，从全文本解析 ==========
+            # 从全文本解析应战者
             text = soup.get_text()
             
-            # 解析应战者和选择 (格式: "应战者XXX 选择：答案X")
+            # 解析应战者和选择
             if m := re.search(r'应战者\s*(\S+?)\s*选择：(答案[一二])', text):
                 res['应战者'] = m.group(1).strip()
                 res['选择'] = m.group(2).strip()
-            # 备用: 只解析应战者名称
             elif m := re.search(r'应战者\s*(\S+?)(?:\s|选择|$)', text):
                 res['应战者'] = m.group(1).strip()
             
@@ -228,10 +249,38 @@ class YaohuoSpeedMonitor:
             ZLog.e(f"解析[{bid}]异常: {e}")
             return None
     
+    def print_result(self, detail, is_win):
+        """
+        配色要求（无时间戳）：
+        - 发起者: 蓝色 (#3498db)
+        - 应战者: 蓝色 (#3498db)
+        - 金额: 蓝色 (#3498db)
+        - 赢字: 绿色 (#2ecc71)
+        - 输字: 红色 (#e74c3c)
+        - 结果文字: 黑色 (#000000)
+        """
+        # 赢/输字颜色
+        win_lose_color = COLORS['green'] if is_win else COLORS['red']
+        win_lose_text = '赢' if is_win else '输'
+        
+        # 构建彩色日志行（已去掉时间戳！）
+        log_line = (
+            f"[{detail['id']}] | "
+            f"发起者:{ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
+            f"应战者:{ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
+            f"赌注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
+            f"正确:{detail['答案']} | "
+            f"选择:{detail['选择']} | "
+            f"{ZLog.color_part(win_lose_text, win_lose_color)} | "
+            f"结果:{ZLog.color_part(detail['结果'], COLORS['black'])}"
+        )
+        
+        print(log_line)
+    
     def run(self):
-        print("\n" + "="*20)
+        print("\n" + "="*50)
         print("🚀 妖火吹牛 - 极速静默监控")
-        print("="*20 + "\n")
+        print("="*50 + "\n")
         
         if not verify_password():
             return
@@ -239,7 +288,7 @@ class YaohuoSpeedMonitor:
             # 1. 获取所有ID
             all_ids = self.get_all_ids()
             
-            # 2. 检查新ID，加入监控（只输出一次加入提示）
+            # 2. 检查新ID，加入监控
             for bid in all_ids:
                 if bid in self.notified:
                     continue
@@ -249,8 +298,6 @@ class YaohuoSpeedMonitor:
                         bet_amount = parse_money(detail['赌注'])
                         if bet_amount >= 20000:
                             self.monitoring[bid] = detail
-                            challenger = detail['应战者'] if detail['应战者'] != '未知' else '待应战'
-                          #  ZLog.d(f"新 [{bid}] {detail['发起者']} | 应战者:{challenger} | 赌注{format_money(detail['赌注'])}")
             
             # 3. 检查监控中的条目，开奖才输出
             completed = []
@@ -258,15 +305,11 @@ class YaohuoSpeedMonitor:
                 detail = self.get_detail(bid)
                 if detail and detail['状态'] == '已结束':
                     result_text = detail['结果']
-                    challenger = detail['应战者'] if detail['应战者'] != '未知' else '未知'
+                    is_win = '应战者胜利' in result_text or '发起者失败' in result_text
                     
-                    # 判断结果：应战者失败红色e，应战者胜利绿色s
-                    if '应战者胜利' in result_text or '发起者失败' in result_text:
-                        # 应战者胜利 - 绿色s
-                        ZLog.s(f"[{bid}] | {detail['发起者']} | 注:{format_money(detail['赌注'])} | {detail['答案']} | {challenger} 赢 选:{detail['选择']} | {detail['结果']}")
-                    else:
-                        # 应战者失败 - 红色e
-                        ZLog.e(f"[{bid}] | {detail['发起者']} | 注:{format_money(detail['赌注'])} | {detail['答案']} | {challenger} 输 选:{detail['选择']} | {detail['结果']}")
+                    # 使用新的彩色日志输出（无时间戳）
+                    self.print_result(detail, is_win)
+                    
                     completed.append(bid)
                     self.notified.add(bid)
             
@@ -274,7 +317,7 @@ class YaohuoSpeedMonitor:
             for bid in completed:
                 del self.monitoring[bid]
             
-            # 5. 等待下一轮（进行中完全不输出）
+            # 5. 等待下一轮
             time.sleep(POLL_INTERVAL)
 
 
