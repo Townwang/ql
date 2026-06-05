@@ -266,9 +266,9 @@ class YaohuoSpeedMonitor:
         # 构建彩色日志行（已去掉时间戳！）
         log_line = (
             f"[{detail['id']}] | "
-            f"发:{ZLog.color_part(detail['发起者'], COLORS['blue'])} "
-            f"注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} \n "
-            f"正确:{detail['答案']} \n"
+            f"发:{ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
+            f"注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
+            f"{detail['答案']} \n"
             f"应:{ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
             f"选择:{detail['选择']} | "
             f"{ZLog.color_part(detail['结果'], win_lose_color)}"
