@@ -318,7 +318,7 @@ class YaohuoSpeedMonitor:
                 del self.monitoring[bid]
             
             # 5. 等待下一轮
-            time.sleep(POLL_INTERVAL)
+            time.sleep(0.1)
 
 
 def main():
