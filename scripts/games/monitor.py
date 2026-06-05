@@ -2,7 +2,7 @@
 # ======================================
 # 添加任务
 """
-name: 全量监控
+name: 妖火吹牛监控
 tag: 游戏,妖火
 instance: single
 
@@ -180,19 +180,17 @@ def verify_password():
     return True
 
 # ======================================
-# 全量监控爬虫类
+# 永久监控爬虫类
 # ======================================
-class YaohuoFullMonitor:
-    """全量吹牛内容监控类"""
+class YaohuoPermanentMonitor:
+    """永久运行全量监控类"""
     
     def __init__(self):
-        self.monitored_ids: Set[str] = set()
-        self.active_monitors: Dict[str, Dict] = {}
+        self.monitored_ids: Set[str] = set()  # 已完成的ID
+        self.active_monitors: Dict[str, Dict] = {}  # 正在监控的条目
     
     def get_all_bull_ids(self) -> List[str]:
         """获取所有吹牛ID"""
-        ZLog.i("刷新吹牛列表...")
-        
         response = request_with_retry(MONITOR_URL)
         if not response:
             return []
@@ -210,7 +208,6 @@ class YaohuoFullMonitor:
                         all_ids.append(bull_id)
             
             all_ids.sort(key=lambda x: int(x), reverse=True)
-            ZLog.i(f"共 {len(all_ids)} 条，最新ID: {all_ids[0] if all_ids else '-'}")
             return all_ids
             
         except Exception as e:
@@ -232,7 +229,6 @@ class YaohuoFullMonitor:
                 'id': bull_id,
                 '发起者': '未知',
                 '赌注金额': '未知',
-                '问题': '未知',
                 '正确答案': '未知',
                 '应战者': '未知',
                 '结果': '未知',
@@ -251,7 +247,7 @@ class YaohuoFullMonitor:
                     elif '赌注金额' in label_text:
                         result['赌注金额'] = value_text
             
-            # 解析问题和结果
+            # 解析答案和结果
             page_text = soup.get_text()
             
             ans_match = re.search(r'正确答案\s*(答案[一二])', page_text)
@@ -272,92 +268,66 @@ class YaohuoFullMonitor:
             return result
             
         except Exception as e:
-            ZLog.e(f"解析详情失败 ID={bull_id}: {str(e)[:30]}")
             return None
     
-    def print_status(self):
-        """打印当前监控状态"""
-        if not self.active_monitors:
-            ZLog.i("当前无进行中的吹牛")
-            return
-        
+    def run(self):
+        """永久运行主循环"""
         print("\n" + "="*70)
-        print(f"{'ID':<8} {'发起者':<10} {'赌注':<8} {'状态':<6} {'答案':<8} {'结果'}")
-        print("-"*70)
-        
-        for bull_id, detail in self.active_monitors.items():
-            print(f"{bull_id:<8} {detail['发起者']:<10} {format_money(detail['赌注金额']):<8} {detail['状态']:<6} {detail['正确答案']:<8} {detail['结果']}")
-        
-        print("="*70 + "\n")
-    
-    def run(self, run_once: bool = False):
-        """启动监控"""
-        print("\n" + "="*70)
-        print(" 🐮 妖火吹牛全量监控工具")
+        print("🐮 妖火吹牛永久监控工具")
         print("="*70 + "\n")
         
         if not verify_password():
             ZLog.e("启动失败")
             return
         
-        ZLog.d(f"轮询间隔: {POLL_INTERVAL}秒 | 监控模式: 全量")
-        ZLog.d("-"*50)
+        ZLog.d("-"*60)
         
         try:
-            while True:
+            while True:  # 永久循环，永不退出
+                # 1. 获取所有吹牛ID
                 all_ids = self.get_all_bull_ids()
                 
-                # 处理新条目
+                # 2. 处理新发现的吹牛
                 new_ids = [bid for bid in all_ids if bid not in self.monitored_ids and bid not in self.active_monitors]
-                if new_ids:
-                    ZLog.d(f"新: {', '.join(new_ids)}")
-                
                 for bull_id in new_ids:
                     detail = self.get_bull_detail(bull_id)
                     if detail:
                         if detail['状态'] == "进行中":
                             self.active_monitors[bull_id] = detail
-                            ZLog.s(f"加入监控 [{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])}")
+                            ZLog.d(f"新 [{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])} 已加入监控")
                         else:
                             self.monitored_ids.add(bull_id)
-                            ZLog.i(f"已结束 [{bull_id}] {detail['发起者']} {detail['结果']}")
                 
-                # 更新活跃条目
+                # 3. 检查所有进行中的吹牛是否开奖
                 completed_ids = []
                 for bull_id in list(self.active_monitors.keys()):
                     detail = self.get_bull_detail(bull_id)
-                    if detail:
-                        self.active_monitors[bull_id] = detail
-                        if detail['状态'] == "已结束":
-                            ZLog.s(f"✅ 开奖 [{bull_id}] {detail['发起者']} {detail['正确答案']} {detail['结果']}")
-                            completed_ids.append(bull_id)
+                    if detail and detail['状态'] == "已结束":
+                        # 开奖了，输出结果
+                        ZLog.s(f"✅ 开奖 [{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])} | {detail['正确答案']} | {detail['结果']}")
+                        completed_ids.append(bull_id)
                 
+                # 4. 移除已开奖的条目
                 for bull_id in completed_ids:
                     self.monitored_ids.add(bull_id)
                     del self.active_monitors[bull_id]
                 
-                # 打印状态
-                self.print_status()
-                
-                if run_once:
-                    ZLog.i("运行完成")
-                    break
-                
-                ZLog.i(f"{POLL_INTERVAL}秒后刷新...\n")
-                time.sleep(POLL_INTERVAL)
+                # 6. 等待下一轮
+                time.sleep()
                 
         except KeyboardInterrupt:
-            ZLog.w("\n用户停止")
+            ZLog.w("\n用户手动停止程序")
         except Exception as e:
-            ZLog.e(f"运行异常: {str(e)[:50]}")
+            ZLog.e(f"运行异常: {str(e)[:50]}，10秒后自动恢复...")
+            time.sleep(10)
+            self.run()  # 异常自动重启
         finally:
             session.close()
 
 
 def main():
-    monitor = YaohuoFullMonitor()
-    monitor.run(run_once=True)
-
+    monitor = YaohuoPermanentMonitor()
+    monitor.run()  # 永久运行，不退出
 
 if __name__ == "__main__":
     main()
