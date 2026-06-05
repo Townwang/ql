@@ -188,29 +188,64 @@ class YaohuoSpeedMonitor:
             soup = BeautifulSoup(resp.text, 'html.parser')
             res = {'id': bid, '发起者': '未知', '应战者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中'}
             
-            for item in soup.find_all('div', class_='detail-item'):
-                lb = item.find('span', class_='detail-label')
-                val = item.find('span', class_='detail-value')
-                if lb and val:
-                    t = lb.get_text().strip()
-                    v = val.get_text().strip()
-                    if '发起者' in t:
-                        res['发起者'] = v
-                    elif '应战者' in t:
-                        res['应战者'] = v
-                    elif '赌注金额' in t:
-                        res['赌注'] = v
-            
             text = soup.get_text()
-            if m := re.search(r'正确答案\s*(答案[一二])', text):
-                res['答案'] = m.group(1)
-            if m := re.search(r'结果\s*(.+?)(?:\n|发起时间)', text):
-                res['结果'] = m.group(1)
             
-            if '结束时间' in text and res['结果'] != '未知':
+            # 方法1: 正则匹配 - 优先使用这种方式
+            patterns = {
+                '发起者': [r'发起者[：:\s]+([^\n\r]+?)(?:\s{2,}|\n|应战者|赌注|$)', r'发布者[：:\s]+([^\n\r]+?)(?:\s{2,}|\n|$)'],
+                '应战者': [r'应战者[：:\s]+([^\n\r]+?)(?:\s{2,}|\n|赌注|发起者|状态|$)', r'接牛者[：:\s]+([^\n\r]+?)(?:\s{2,}|\n|$)'],
+                '赌注': [r'赌注[：:\s]+([^\n\r]+?)(?:\s{2,}|\n|发起者|应战者|$)', r'金额[：:\s]+([^\n\r]+?)(?:\s{2,}|\n|$)'],
+            }
+            
+            for field, pattern_list in patterns.items():
+                for pattern in pattern_list:
+                    match = re.search(pattern, text)
+                    if match:
+                        value = match.group(1).strip()
+                        if value and value != '':
+                            res[field] = value
+                            break
+            
+            # 方法2: 表格行提取（备用方案）
+            for tr in soup.find_all('tr'):
+                row_text = tr.get_text().strip()
+                tds = tr.find_all('td')
+                if len(tds) < 2:
+                    continue
+                td_text = [td.get_text().strip() for td in tds]
+                row_str = ' '.join(td_text)
+                
+                if '发起者' in row_str or '发布者' in row_str:
+                    for i, td in enumerate(td_text):
+                        if '发起者' in td or '发布者' in td:
+                            if i + 1 < len(td_text):
+                                res['发起者'] = td_text[i+1].strip()
+                                break
+                elif '应战者' in row_str or '接牛' in row_str:
+                    for i, td in enumerate(td_text):
+                        if '应战者' in td or '接牛' in td:
+                            if i + 1 < len(td_text):
+                                res['应战者'] = td_text[i+1].strip()
+                                break
+                elif '赌注' in row_str or '金额' in row_str:
+                    for i, td in enumerate(td_text):
+                        if '赌注' in td or '金额' in td:
+                            if i + 1 < len(td_text):
+                                res['赌注'] = td_text[i+1].strip()
+                                break
+            
+            # 答案和结果提取
+            if m := re.search(r'正确答案[：:\s]*(答案[一二])', text):
+                res['答案'] = m.group(1)
+            if m := re.search(r'结果[：:\s]*(.+?)(?:\n|发起时间|结束时间|$)', text):
+                res['结果'] = m.group(1).strip()
+            
+            # 状态判断
+            if '结束时间' in text and res['结果'] != '未知' and res['结果'] != '':
                 res['状态'] = '已结束'
+            
             return res
-        except:
+        except Exception as e:
             return None
     
     def run(self):
@@ -234,8 +269,6 @@ class YaohuoSpeedMonitor:
                         bet_amount = parse_money(detail['赌注'])
                         if bet_amount >= 20000:
                             self.monitoring[bid] = detail
-                            challenger = detail['应战者'] if detail['应战者'] != '未知' else '待应战'
-                           # ZLog.d(f"新 [{bid}] {detail['发起者']} | 应战者:{challenger} | 赌注{format_money(detail['赌注'])}")
             
             # 3. 检查监控中的条目，开奖才输出
             completed = []
