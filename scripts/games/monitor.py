@@ -237,7 +237,7 @@ class YaohuoSpeedMonitor:
                 res['答案'] = m.group(1)
             
             # 解析结果
-            if m := re.search(r'结果\s*(应战者胜利|应战者失败|发起者胜利|发起者失败)', text):
+            if m := re.search(r'结果\s*(应战者胜出|应战者失败|发起者胜出|发起者失败)', text):
                 res['结果'] = m.group(1)
             
             # 判断状态
@@ -295,7 +295,7 @@ class YaohuoSpeedMonitor:
                     if not detail:
                         continue
                     bet_amount = parse_money(detail['赌注'])
-                    if bet_amount >= 20000:
+                    if bet_amount >= 200:
                         self.monitoring[bid] = detail
             
             # 3. 检查监控中的条目，开奖才输出
@@ -306,7 +306,7 @@ class YaohuoSpeedMonitor:
                     continue
                 if detail['状态'] == '已结束':
                     result_text = detail['结果']
-                    is_win = '应战者胜利' in result_text or '发起者失败' in result_text
+                    is_win = '应战者胜出' in result_text or '发起者失败' in result_text
                     # 输出日志
                     self.print_result(detail, is_win)
                     completed.append(bid)
