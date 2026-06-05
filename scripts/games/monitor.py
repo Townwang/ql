@@ -267,7 +267,7 @@ class YaohuoSpeedMonitor:
                     detail = self.get_detail(bid)
                     if detail and detail['状态'] == '进行中':
                         bet_amount = parse_money(detail['赌注'])
-                        if bet_amount >= 20000:
+                        if bet_amount >= 200:
                             self.monitoring[bid] = detail
             
             # 3. 检查监控中的条目，开奖才输出
