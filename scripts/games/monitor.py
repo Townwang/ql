@@ -176,7 +176,6 @@ def verify_password():
     if "needpassword" in resp.text and "请输入密码" in resp.text:
         ZLog.e("密码错误，请检查YH_PASSWORD")
         return False
-    ZLog.s("密码验证通过")
     return True
 
 # ======================================
@@ -304,7 +303,7 @@ class YaohuoPermanentMonitor:
                     detail = self.get_bull_detail(bull_id)
                     if detail and detail['状态'] == "已结束":
                         # 开奖了，输出结果
-                        ZLog.s(f"✅ 开奖 [{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])} | {detail['正确答案']} | {detail['结果']}")
+                        ZLog.s(f"[{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])} | {detail['正确答案']} | {detail['结果']}")
                         completed_ids.append(bull_id)
                 
                 # 4. 移除已开奖的条目
