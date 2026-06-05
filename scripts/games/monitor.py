@@ -313,7 +313,7 @@ class YaohuoPermanentMonitor:
                     del self.active_monitors[bull_id]
                 
                 # 6. 等待下一轮
-                time.sleep()
+                time.sleep(100)
                 
         except KeyboardInterrupt:
             ZLog.w("\n用户手动停止程序")
