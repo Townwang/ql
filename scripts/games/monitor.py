@@ -2,7 +2,7 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛监控
+name: 妖火监控
 tag: 游戏,妖火
 instance: single
 
@@ -11,8 +11,8 @@ instance: single
 """
 @env YH_COOKIE= 妖火Cookie
 @env YH_PASSWORD= 你的妖火密码
-@env YH_POLL_SEC=10      # 轮询间隔秒数，默认10
-@env YH_TIMEOUT=20       # 请求超时时间
+@env YH_POLL_SEC=1       # 轮询间隔秒数，默认1秒
+@env YH_TIMEOUT=10       # 请求超时时间
 """
 # 依赖声明
 """
@@ -34,7 +34,7 @@ from typing import Dict, List, Optional, Set
 from requests.adapters import HTTPAdapter
 
 # ======================================
-# 精简彩色日志系统
+# 精简彩色日志
 # ======================================
 class ZLog:
     @staticmethod
@@ -51,9 +51,6 @@ class ZLog:
         print(f"[{timestamp}] {color}{msg}{reset}")
 
     @staticmethod
-    def i(msg):
-        ZLog.log_color(msg, "#888888")
-    @staticmethod
     def s(msg):
         ZLog.log_color(msg, "#2ecc71")
     @staticmethod
@@ -67,26 +64,25 @@ class ZLog:
         ZLog.log_color(msg, "#3498db")
 
 # ======================================
-# 环境变量配置
+# 配置
 # ======================================
 COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 try:
-    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 10))
+    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 1))  # 默认1秒
 except ValueError:
-    POLL_INTERVAL = 10
+    POLL_INTERVAL = 1
 try:
-    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 20))
+    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 10))
 except ValueError:
-    REQ_TIMEOUT = 20
+    REQ_TIMEOUT = 10
 
-# 网站配置
 BASE_URL = 'https://yaohuo.me'
 MONITOR_URL = f'{BASE_URL}/games/chuiniu/'
 API_BET = f'{BASE_URL}/games/chuiniu/add.aspx'
 
 # ======================================
-# TCP连接优化 - Session全局初始化
+# TCP连接优化
 # ======================================
 class TCPOptimizedAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
@@ -97,28 +93,15 @@ class TCPOptimizedAdapter(HTTPAdapter):
         return super().init_poolmanager(*args, **kwargs)
 
 session = requests.Session()
-session.mount('http://', TCPOptimizedAdapter(
-    pool_connections=20,
-    pool_maxsize=50,
-    pool_block=False
-))
-session.mount('https://', TCPOptimizedAdapter(
-    pool_connections=20,
-    pool_maxsize=50,
-    pool_block=False
-))
+session.mount('http://', TCPOptimizedAdapter(pool_connections=30, pool_maxsize=100, pool_block=False))
+session.mount('https://', TCPOptimizedAdapter(pool_connections=30, pool_maxsize=100, pool_block=False))
 
-# 全局请求头
 REQUEST_HEADERS = {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Cache-Control': 'max-age=0',
     'Connection': 'keep-alive',
-    'Content-Type': 'application/x-www-form-urlencoded',
     'Cookie': COOKIE,
-    'Origin': BASE_URL,
-    'Referer': API_BET,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 session.headers.update(REQUEST_HEADERS)
 
@@ -135,10 +118,7 @@ def format_money(num):
     except:
         return str(num)
 
-# ======================================
-# 带重试请求
-# ======================================
-def request_with_retry(url, method="GET", data=None, max_retries=5):
+def request_with_retry(url, method="GET", data=None, max_retries=3):
     for attempt in range(1, max_retries + 1):
         try:
             if method.upper() == "GET":
@@ -146,187 +126,127 @@ def request_with_retry(url, method="GET", data=None, max_retries=5):
             else:
                 resp = session.post(url, data=data, timeout=REQ_TIMEOUT)
             resp.raise_for_status()
-            
-            if "请先登录" in resp.text or "登录网站" in resp.text:
-                ZLog.e("登录已失效，请更新Cookie")
+            if "请先登录" in resp.text:
+                ZLog.e("Cookie失效，请更新")
                 return None
-            
             return resp
         except Exception as e:
-            ZLog.w(f"请求重试 {attempt}/{max_retries}: {str(e)[:30]}")
             if attempt < max_retries:
-                time.sleep(2)
-    ZLog.e("请求失败，已达最大重试次数")
+                time.sleep(0.5)
     return None
 
-# ======================================
-# 密码验证
-# ======================================
 def verify_password():
     if not PASSWORD:
-        ZLog.e("未设置YH_PASSWORD环境变量")
+        ZLog.e("未设置YH_PASSWORD")
         return False
-    post_data = {'needpassword': PASSWORD}
-    resp = request_with_retry(API_BET, "POST", post_data)
-    if not resp:
-        return False
+    request_with_retry(API_BET, "POST", {'needpassword': PASSWORD})
     resp = request_with_retry(API_BET, "GET")
-    if not resp:
+    if resp and "请输入密码" in resp.text:
+        ZLog.e("密码错误")
         return False
-    if "needpassword" in resp.text and "请输入密码" in resp.text:
-        ZLog.e("密码错误，请检查YH_PASSWORD")
-        return False
+    ZLog.s("密码验证通过")
     return True
 
 # ======================================
-# 永久监控爬虫类
+# 极速静默监控类
 # ======================================
-class YaohuoPermanentMonitor:
-    """永久运行全量监控类"""
-    
+class YaohuoSpeedMonitor:
     def __init__(self):
-        self.monitored_ids: Set[str] = set()  # 已完成的ID
-        self.active_monitors: Dict[str, Dict] = {}  # 正在监控的条目
+        self.notified: Set[str] = set()  # 已开奖播报过的ID
+        self.monitoring: Dict[str, Dict] = {}  # 正在监控的条目
     
-    def get_all_bull_ids(self) -> List[str]:
-        """获取所有吹牛ID"""
-        response = request_with_retry(MONITOR_URL)
-        if not response:
+    def get_all_ids(self) -> List[str]:
+        resp = request_with_retry(MONITOR_URL)
+        if not resp:
             return []
-        
         try:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            id_pattern = re.compile(r'doit\.aspx\?id=(\d+)')
-            all_ids = []
-            
-            for link in soup.find_all('a', href=True):
-                match = id_pattern.search(link['href'])
-                if match:
-                    bull_id = match.group(1)
-                    if bull_id not in all_ids:
-                        all_ids.append(bull_id)
-            
-            all_ids.sort(key=lambda x: int(x), reverse=True)
-            return all_ids
-            
-        except Exception as e:
-            ZLog.e(f"解析列表失败: {str(e)[:30]}")
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            ids = []
+            for link in soup.find_all('a', href=re.compile(r'doit\.aspx\?id=\d+')):
+                bid = re.search(r'id=(\d+)', link['href']).group(1)
+                if bid not in ids:
+                    ids.append(bid)
+            return sorted(ids, key=lambda x: int(x), reverse=True)
+        except:
             return []
     
-    def get_bull_detail(self, bull_id: str) -> Optional[Dict]:
-        """获取吹牛详情"""
-        detail_url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&touserid=24770&id={bull_id}'
-        
-        response = request_with_retry(detail_url)
-        if not response:
+    def get_detail(self, bid: str) -> Optional[Dict]:
+        url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&touserid=24770&id={bid}'
+        resp = request_with_retry(url)
+        if not resp:
             return None
-        
         try:
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            res = {'id': bid, '发起者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中'}
             
-            result = {
-                'id': bull_id,
-                '发起者': '未知',
-                '赌注金额': '未知',
-                '正确答案': '未知',
-                '应战者': '未知',
-                '结果': '未知',
-                '状态': '进行中'
-            }
-            
-            # 解析detail-item结构
             for item in soup.find_all('div', class_='detail-item'):
-                label = item.find('span', class_='detail-label')
-                value = item.find('span', class_='detail-value')
-                if label and value:
-                    label_text = label.get_text().strip()
-                    value_text = value.get_text().strip()
-                    if '发起者' in label_text:
-                        result['发起者'] = value_text
-                    elif '赌注金额' in label_text:
-                        result['赌注金额'] = value_text
+                lb = item.find('span', class_='detail-label')
+                val = item.find('span', class_='detail-value')
+                if lb and val:
+                    t = lb.get_text().strip()
+                    v = val.get_text().strip()
+                    if '发起者' in t:
+                        res['发起者'] = v
+                    elif '赌注金额' in t:
+                        res['赌注'] = v
             
-            # 解析答案和结果
-            page_text = soup.get_text()
+            text = soup.get_text()
+            if m := re.search(r'正确答案\s*(答案[一二])', text):
+                res['答案'] = m.group(1)
+            if m := re.search(r'结果\s*(.+?)(?:\n|发起时间)', text):
+                res['结果'] = m.group(1)
             
-            ans_match = re.search(r'正确答案\s*(答案[一二])', page_text)
-            if ans_match:
-                result['正确答案'] = ans_match.group(1).strip()
-            
-            challenger_match = re.search(r'应战者\s*(.+?)\s*选择', page_text)
-            if challenger_match:
-                result['应战者'] = challenger_match.group(1).strip()
-            
-            result_match = re.search(r'结果\s*(.+?)(?:\n|发起时间|$)', page_text)
-            if result_match:
-                result['结果'] = result_match.group(1).strip()
-            
-            if '结束时间' in page_text and result['结果'] != '未知':
-                result['状态'] = '已结束'
-            
-            return result
-            
-        except Exception as e:
+            if '结束时间' in text and res['结果'] != '未知':
+                res['状态'] = '已结束'
+            return res
+        except:
             return None
     
     def run(self):
-        """永久运行主循环"""
-        print("\n" + "="*70)
-        print("🐮 妖火吹牛永久监控工具")
-        print("="*70 + "\n")
+        print("\n" + "="*20)
+        print("🚀 妖火吹牛 - 极速静默监控")
+        print(f"轮询间隔: {POLL_INTERVAL}秒 | 只输出关键事件")
+        print("="*20 + "\n")
         
         if not verify_password():
-            ZLog.e("启动失败")
             return
         
-        ZLog.d("-"*60)
+        ZLog.d("监控已启动，新吹牛自动加入，开奖自动播报，进行中静默运行...\n")
         
-        try:
-            while True:  # 永久循环，永不退出
-                # 1. 获取所有吹牛ID
-                all_ids = self.get_all_bull_ids()
-                
-                # 2. 处理新发现的吹牛
-                new_ids = [bid for bid in all_ids if bid not in self.monitored_ids and bid not in self.active_monitors]
-                for bull_id in new_ids:
-                    detail = self.get_bull_detail(bull_id)
-                    if detail:
-                        if detail['状态'] == "进行中":
-                            self.active_monitors[bull_id] = detail
-                            ZLog.d(f"新 [{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])} 已加入监控")
-                        else:
-                            self.monitored_ids.add(bull_id)
-                
-                # 3. 检查所有进行中的吹牛是否开奖
-                completed_ids = []
-                for bull_id in list(self.active_monitors.keys()):
-                    detail = self.get_bull_detail(bull_id)
-                    if detail and detail['状态'] == "已结束":
-                        # 开奖了，输出结果
-                        ZLog.s(f"[{bull_id}] {detail['发起者']} 赌注{format_money(detail['赌注金额'])} | {detail['正确答案']} | {detail['结果']}")
-                        completed_ids.append(bull_id)
-                
-                # 4. 移除已开奖的条目
-                for bull_id in completed_ids:
-                    self.monitored_ids.add(bull_id)
-                    del self.active_monitors[bull_id]
-                
-                # 6. 等待下一轮
-                time.sleep(100)
-                
-        except KeyboardInterrupt:
-            ZLog.w("\n用户手动停止程序")
-        except Exception as e:
-            ZLog.e(f"运行异常: {str(e)[:50]}，10秒后自动恢复...")
-            time.sleep(10)
-            self.run()  # 异常自动重启
-        finally:
-            session.close()
+        while True:
+            # 1. 获取所有ID
+            all_ids = self.get_all_ids()
+            
+            # 2. 检查新ID，加入监控（只输出一次加入提示）
+            for bid in all_ids:
+                if bid in self.notified:
+                    continue
+                if bid not in self.monitoring:
+                    detail = self.get_detail(bid)
+                    if detail and detail['状态'] == '进行中':
+                        self.monitoring[bid] = detail
+                        ZLog.d(f"新 [{bid}] {detail['发起者']} 赌注{format_money(detail['赌注'])}")
+            
+            # 3. 检查监控中的条目，开奖才输出
+            completed = []
+            for bid in list(self.monitoring.keys()):
+                detail = self.get_detail(bid)
+                if detail and detail['状态'] == '已结束':
+                    ZLog.s(f"开 [{bid}] {detail['发起者']} {detail['答案']} {detail['结果']} 赌注{format_money(detail['赌注'])}")
+                    completed.append(bid)
+                    self.notified.add(bid)
+            
+            # 4. 移除已开奖的
+            for bid in completed:
+                del self.monitoring[bid]
+            
+            # 5. 等待下一轮（进行中完全不输出）
+            time.sleep(POLL_INTERVAL)
 
 
 def main():
-    monitor = YaohuoPermanentMonitor()
-    monitor.run()  # 永久运行，不退出
+    m = YaohuoSpeedMonitor()
+    m.run()
 
 if __name__ == "__main__":
     main()
