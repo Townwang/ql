@@ -154,7 +154,6 @@ def verify_password():
     if resp and "请输入密码" in resp.text:
         ZLog.e("密码错误")
         return False
-    ZLog.s("密码验证通过")
     return True
 
 # ======================================
@@ -187,7 +186,7 @@ class YaohuoSpeedMonitor:
             return None
         try:
             soup = BeautifulSoup(resp.text, 'html.parser')
-            res = {'id': bid, '发起者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中'}
+            res = {'id': bid, '发起者': '未知', '应战者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中'}
             
             for item in soup.find_all('div', class_='detail-item'):
                 lb = item.find('span', class_='detail-label')
@@ -197,6 +196,8 @@ class YaohuoSpeedMonitor:
                     v = val.get_text().strip()
                     if '发起者' in t:
                         res['发起者'] = v
+                    elif '应战者' in t:
+                        res['应战者'] = v
                     elif '赌注金额' in t:
                         res['赌注'] = v
             
@@ -215,7 +216,6 @@ class YaohuoSpeedMonitor:
     def run(self):
         print("\n" + "="*20)
         print("🚀 妖火吹牛 - 极速静默监控")
-        print(f"轮询间隔: {POLL_INTERVAL}秒 | 只输出关键事件 | 仅监控2万以上赌注")
         print("="*20 + "\n")
         
         if not verify_password():
@@ -234,14 +234,25 @@ class YaohuoSpeedMonitor:
                         bet_amount = parse_money(detail['赌注'])
                         if bet_amount >= 20000:
                             self.monitoring[bid] = detail
-                            ZLog.d(f"新 [{bid}] {detail['发起者']} 赌注{format_money(detail['赌注'])}")
+                            challenger = detail['应战者'] if detail['应战者'] != '未知' else '待应战'
+                           # ZLog.d(f"新 [{bid}] {detail['发起者']} | 应战者:{challenger} | 赌注{format_money(detail['赌注'])}")
             
             # 3. 检查监控中的条目，开奖才输出
             completed = []
             for bid in list(self.monitoring.keys()):
                 detail = self.get_detail(bid)
                 if detail and detail['状态'] == '已结束':
-                    ZLog.s(f"开 [{bid}] {detail['发起者']} {detail['答案']} {detail['结果']} 赌注{format_money(detail['赌注'])}")
+                    result_text = detail['结果']
+                    challenger = detail['应战者'] if detail['应战者'] != '未知' else '未知'
+                    
+                    # 判断结果：应战者失败红色e，应战者胜利绿色s
+                    if '应战者胜利' in result_text or '发起者失败' in result_text:
+                        # 应战者胜利 - 绿色s
+                        ZLog.s(f"赢 [{bid}] 应:{challenger} | 发:{detail['发起者']} | {detail['答案']} | {detail['结果']} | 注{format_money(detail['赌注'])}")
+                    else:
+                        # 应战者失败 - 红色e
+                        ZLog.e(f"输 [{bid}] 应:{challenger} | 发:{detail['发起者']} | {detail['答案']} | {detail['结果']} | 注{format_money(detail['赌注'])}")
+                    
                     completed.append(bid)
                     self.notified.add(bid)
             
