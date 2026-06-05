@@ -91,7 +91,7 @@ COLORS = {
 COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 try:
-    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 1))  # 默认1秒
+    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 0.2))  # 默认1秒
 except ValueError:
     POLL_INTERVAL = 1
 try:
@@ -179,7 +179,7 @@ def verify_password():
     return True
 
 # ======================================
-# 极速静默监控类 - 无时间戳版本
+# 极速静默监控类 - 修复漏单
 # ======================================
 class YaohuoSpeedMonitor:
     def __init__(self):
@@ -246,7 +246,7 @@ class YaohuoSpeedMonitor:
             
             return res
         except Exception as e:
-            ZLog.e(f"解析[{bid}]异常: {e}")
+            ZLog.w(f"解析[{bid}]异常: {e},本轮跳过,下次继续抓取")
             return None
     
     def print_result(self, detail, is_win):
@@ -261,7 +261,6 @@ class YaohuoSpeedMonitor:
         """
         # 赢/输字颜色
         win_lose_color = COLORS['green'] if is_win else COLORS['red']
-        win_lose_text = '赢' if is_win else '输'
         
         # 构建彩色日志行（已去掉时间戳！）
         log_line = (
@@ -278,7 +277,7 @@ class YaohuoSpeedMonitor:
     
     def run(self):
         print("\n" + "="*30)
-        print("🚀 妖火吹牛 - 极速静默监控")
+        print("🚀 妖火吹牛 - 极速静默监控【修复漏单版】")
         print("="*30 + "\n")
         
         if not verify_password():
@@ -287,38 +286,39 @@ class YaohuoSpeedMonitor:
             # 1. 获取所有ID
             all_ids = self.get_all_ids()
             
-            # 2. 检查新ID，加入监控
+            # 2. 检查新ID，>=2w全部入监控【不再过滤进行中/已结束】
             for bid in all_ids:
                 if bid in self.notified:
                     continue
                 if bid not in self.monitoring:
                     detail = self.get_detail(bid)
-                    if detail and detail['状态'] == '进行中':
-                        bet_amount = parse_money(detail['赌注'])
-                        if bet_amount >= 20000:
-                            self.monitoring[bid] = detail
+                    if not detail:
+                        continue
+                    bet_amount = parse_money(detail['赌注'])
+                    if bet_amount >= 20000:
+                        self.monitoring[bid] = detail
             
             # 3. 检查监控中的条目，开奖才输出
             completed = []
             for bid in list(self.monitoring.keys()):
                 detail = self.get_detail(bid)
-                if detail and detail['状态'] == '已结束':
+                if not detail:
+                    continue
+                if detail['状态'] == '已结束':
                     result_text = detail['结果']
                     is_win = '应战者胜利' in result_text or '发起者失败' in result_text
-                    
-                    # 使用新的彩色日志输出（无时间戳）
+                    # 输出日志
                     self.print_result(detail, is_win)
-                    
                     completed.append(bid)
                     self.notified.add(bid)
             
-            # 4. 移除已开奖的
+            # 4. 播报成功后移除
             for bid in completed:
                 print("="*30 + "\n")
                 del self.monitoring[bid]
             
-            # 5. 等待下一轮
-            time.sleep(0.1)
+            # 5. 使用环境变量配置间隔，不再固定0.1
+            time.sleep(POLL_INTERVAL)
 
 
 def main():
