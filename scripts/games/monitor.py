@@ -266,21 +266,20 @@ class YaohuoSpeedMonitor:
         # 构建彩色日志行（已去掉时间戳！）
         log_line = (
             f"[{detail['id']}] | "
-            f"发起者:{ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
-            f"应战者:{ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
-            f"赌注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
-            f"正确:{detail['答案']} | "
+            f"发:{ZLog.color_part(detail['发起者'], COLORS['blue'])} "
+            f"注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} \n "
+            f"正确:{detail['答案']} \n"
+            f"应:{ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
             f"选择:{detail['选择']} | "
-            f"{ZLog.color_part(win_lose_text, win_lose_color)} | "
-            f"结果:{ZLog.color_part(detail['结果'], COLORS['black'])}"
+            f"{ZLog.color_part(detail['结果'], win_lose_color)}"
         )
         
         print(log_line)
     
     def run(self):
-        print("\n" + "="*50)
+        print("\n" + "="*30)
         print("🚀 妖火吹牛 - 极速静默监控")
-        print("="*50 + "\n")
+        print("="*30 + "\n")
         
         if not verify_password():
             return
@@ -315,6 +314,7 @@ class YaohuoSpeedMonitor:
             
             # 4. 移除已开奖的
             for bid in completed:
+                print("="*30 + "\n")
                 del self.monitoring[bid]
             
             # 5. 等待下一轮
