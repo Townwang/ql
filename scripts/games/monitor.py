@@ -247,10 +247,10 @@ class YaohuoSpeedMonitor:
                     detail = self.get_detail(bid)
                     if detail and detail['状态'] == '进行中':
                         bet_amount = parse_money(detail['赌注'])
-                        if bet_amount >= 200:
+                        if bet_amount >= 20000:
                             self.monitoring[bid] = detail
                             challenger = detail['应战者'] if detail['应战者'] != '未知' else '待应战'
-                            ZLog.d(f"新 [{bid}] {detail['发起者']} | 应战者:{challenger} | 赌注{format_money(detail['赌注'])}")
+                          #  ZLog.d(f"新 [{bid}] {detail['发起者']} | 应战者:{challenger} | 赌注{format_money(detail['赌注'])}")
             
             # 3. 检查监控中的条目，开奖才输出
             completed = []
@@ -263,11 +263,10 @@ class YaohuoSpeedMonitor:
                     # 判断结果：应战者失败红色e，应战者胜利绿色s
                     if '应战者胜利' in result_text or '发起者失败' in result_text:
                         # 应战者胜利 - 绿色s
-                        ZLog.s(f"赢 [{bid}] 应:{challenger} | 发:{detail['发起者']} | 选{detail['选择']} | 正{detail['答案']} | {detail['结果']} | 注{format_money(detail['赌注'])}")
+                        ZLog.s(f"[{bid}] | {detail['发起者']} | 注:{format_money(detail['赌注'])} | {detail['答案']} | {challenger} 赢 选:{detail['选择']} | {detail['结果']}")
                     else:
                         # 应战者失败 - 红色e
-                        ZLog.e(f"输 [{bid}] 应:{challenger} | 发:{detail['发起者']} | 选{detail['选择']} | 正{detail['答案']} | {detail['结果']} | 注{format_money(detail['赌注'])}")
-                    
+                        ZLog.e(f"[{bid}] | {detail['发起者']} | 注:{format_money(detail['赌注'])} | {detail['答案']} | {challenger} 输 选:{detail['选择']} | {detail['结果']}")
                     completed.append(bid)
                     self.notified.add(bid)
             
