@@ -295,7 +295,7 @@ class YaohuoSpeedMonitor:
                     if not detail:
                         continue
                     bet_amount = parse_money(detail['赌注'])
-                    if bet_amount >= 200:
+                    if bet_amount >= 20000:
                         self.monitoring[bid] = detail
             
             # 3. 检查监控中的条目，开奖才输出
