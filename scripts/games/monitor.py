@@ -118,6 +118,16 @@ def format_money(num):
     except:
         return str(num)
 
+def parse_money(s):
+    try:
+        s = str(s).strip()
+        if '万' in s:
+            return int(float(s.replace('万', '')) * 10000)
+        else:
+            return int(s)
+    except:
+        return 0
+
 def request_with_retry(url, method="GET", data=None, max_retries=3):
     for attempt in range(1, max_retries + 1):
         try:
@@ -205,14 +215,11 @@ class YaohuoSpeedMonitor:
     def run(self):
         print("\n" + "="*20)
         print("🚀 妖火吹牛 - 极速静默监控")
-        print(f"轮询间隔: {POLL_INTERVAL}秒 | 只输出关键事件")
+        print(f"轮询间隔: {POLL_INTERVAL}秒 | 只输出关键事件 | 仅监控2万以上赌注")
         print("="*20 + "\n")
         
         if not verify_password():
             return
-        
-        ZLog.d("监控已启动，新吹牛自动加入，开奖自动播报，进行中静默运行...\n")
-        
         while True:
             # 1. 获取所有ID
             all_ids = self.get_all_ids()
@@ -224,8 +231,10 @@ class YaohuoSpeedMonitor:
                 if bid not in self.monitoring:
                     detail = self.get_detail(bid)
                     if detail and detail['状态'] == '进行中':
-                        self.monitoring[bid] = detail
-                        ZLog.d(f"新 [{bid}] {detail['发起者']} 赌注{format_money(detail['赌注'])}")
+                        bet_amount = parse_money(detail['赌注'])
+                        if bet_amount >= 20000:
+                            self.monitoring[bid] = detail
+                            ZLog.d(f"新 [{bid}] {detail['发起者']} 赌注{format_money(detail['赌注'])}")
             
             # 3. 检查监控中的条目，开奖才输出
             completed = []
