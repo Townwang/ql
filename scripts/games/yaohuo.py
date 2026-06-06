@@ -43,10 +43,11 @@ PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
     "base_bet": 666,           # 基础投注
-    "max_bet": 340992,          # 单次最大投注
-    "max_network_errors": 10,   # 网络错误超限次数
-    "request_retries": 5,       # 单接口请求重试次数
-    "request_timeout": 20,      # 请求超时时间
+    "max_bet": 365380,         # 单次最大投注
+    "lose_multiple": 2.2,      # 新增：连败倍率 2.1倍
+    "max_network_errors": 10,  # 网络错误超限次数
+    "request_retries": 5,      # 单接口请求重试次数
+    "request_timeout": 20,    # 请求超时时间
 }
 
 # 路径常量
@@ -331,11 +332,13 @@ def parse_game_records(html):
         return []
 
 # ======================================
-# 投注金额计算
+# 【修改点】投注金额计算：上一局 * 2.1，保留上下限
 # ======================================
 def calc_real_bet():
-    next_bet = state.total_lose_sum + state.base_bet
+    # 新规则：当前目标投注 = 上一局投注 * 2.1
+    next_bet = state.real_bet * CONFIG["lose_multiple"]
     final_int = int(next_bet)
+    # 限制在 基础投注 ~ 最大投注 之间
     final_int = max(min(final_int, CONFIG["max_bet"]), CONFIG["base_bet"])
     return final_int
 
@@ -413,9 +416,10 @@ def check_bet_result():
         refresh_balance()
         ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
-        # 赢了：无论是否大额投注，全部重置
+        # 赢局：重置为基础投注
         state.total_lose_sum = 0
         state.target_bet = state.base_bet
+        state.real_bet = state.base_bet
 
     elif result == "lose":
         state.loss_count += 1
@@ -423,14 +427,16 @@ def check_bet_result():
         state.total_profit -= amount
         state.last_result = "lose"
         
-        # 输了：如果是封顶投注，强制重置；否则累加亏损
+        # 输局：封顶则重置，否则按 2.1倍计算下一局投注
         if is_max_bet_round:
-            ZLog.w(f"封顶投注输了：不累计亏损，强制重置")
+            ZLog.w(f"封顶投注输了：强制重置为基础投注")
             state.total_lose_sum = 0
             state.target_bet = state.base_bet
+            state.real_bet = state.base_bet
         else:
             state.total_lose_sum += amount
             state.target_bet = calc_real_bet()
+            state.real_bet = state.target_bet
             
         refresh_balance()
         ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
@@ -440,7 +446,6 @@ def check_bet_result():
         state.last_bet_id = None
         return None
 
-    state.real_bet = state.target_bet
     state.last_bet_id = None
     save_game_state()
     refresh_balance()
@@ -451,7 +456,7 @@ def check_bet_result():
 # ======================================
 def check_config_valid():
     required_numeric = [
-        "base_bet", "max_bet",
+        "base_bet", "max_bet", "lose_multiple",
         "max_network_errors", "request_retries", "request_timeout",
     ]
     for key in required_numeric:
@@ -528,7 +533,7 @@ def send_bet():
     if state.current_balance < bet_amount:
         if not state.balance_low_notified:
             ZLog.e(f"余额不足 {format_money(state.current_balance)} < {format_money(bet_amount)}")
-            state.balance_low_notified = True
+        state.balance_low_notified = True
         time.sleep(10)
         return False
     state.balance_low_notified = False
@@ -672,6 +677,9 @@ def load_game_state():
             state.total_bet_amount = 0
             state.total_lose_sum = 0
             state.save_date = today
+            # 跨天重置投注基数
+            state.real_bet = CONFIG["base_bet"]
+            state.target_bet = CONFIG["base_bet"]
         else:
             state.total_bet_amount = data.get("total_bet_amount", 0)
     except:
@@ -690,6 +698,7 @@ def safe_exit():
 def main():
     ZLog.i("=" * 20)
     ZLog.i("妖火吹牛 - 优化版 v2.1")
+    ZLog.i("✓ 每局输掉后下局投注 = 上局 × 2.1倍")
     ZLog.i("✓ 支持手动大额投注自动识别")
     ZLog.i("✓ 实际金额判断封顶投注")
     ZLog.i("✓ 无限等待结果（无超时）")
@@ -706,7 +715,7 @@ def main():
     state.is_running = True
     state.base_bet = CONFIG["base_bet"]
 
-    ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']}")
+    ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']} | 连败倍率:{CONFIG['lose_multiple']}")
 
     try:
         while state.is_running:
