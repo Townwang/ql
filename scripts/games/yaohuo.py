@@ -5,7 +5,6 @@
 name: 妖火吹牛
 tag: 游戏,妖火
 instance: single
-
 """
 # 变量声明 （可设置在docker环境变量）
 """
@@ -43,7 +42,7 @@ PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 CONFIG = {
     "base_bet": 666,           # 基础投注
     "max_bet": 365380,         # 单次最大投注
-    "lose_multiple": 2.2,      # 新增：连败倍率 2.1倍
+    "lose_multiple": 2.2,      # 连败倍率
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
     "request_timeout": 20,    # 请求超时时间
@@ -117,6 +116,12 @@ class GameState:
         self.last_challenger = ""
 
         self.balance_low_notified = False
+        
+        # 局数计数器
+        self.round_counter = 0
+        
+        # 固定模式 1212 或 2121
+        self.fixed_pattern = [1, 2, 1, 2]
 
     @staticmethod
     def get_today():
@@ -331,39 +336,80 @@ def parse_game_records(html):
         return []
 
 # ======================================
-# 【修改点】投注金额计算：上一局 * 2.1，保留上下限
+# 投注金额计算：上一局 * 2.2 + 随机加减
 # ======================================
 def calc_real_bet():
-    # 新规则：当前目标投注 = 上一局投注 * 2.1
+    # 基础计算：当前目标投注 = 上一局投注 * 2.2
     next_bet = state.real_bet * CONFIG["lose_multiple"]
+    
+    # 第三局以后，随机加减 0-500 * 倍数
+    if state.round_counter >= 3:
+        # 生成 0-500 的随机基础值
+        random_base = random.randint(0, 500)
+        # 乘以倍数
+        random_adjust = int(random_base * CONFIG["lose_multiple"])
+        # 50%概率加，50%概率减
+        if random.choice([True, False]):
+            next_bet += random_adjust
+            ZLog.d(f"投注随机 +{random_adjust} (基础:{random_base} × {CONFIG['lose_multiple']})")
+        else:
+            next_bet -= random_adjust
+            ZLog.d(f"投注随机 -{random_adjust} (基础:{random_base} × {CONFIG['lose_multiple']})")
+    
     final_int = int(next_bet)
     # 限制在 基础投注 ~ 最大投注 之间
     final_int = max(min(final_int, CONFIG["max_bet"]), CONFIG["base_bet"])
     return final_int
 
 # ======================================
-# 选择答案
+# 选择答案策略
 # ======================================
-def choose_bet_answer():
-    import datetime
-    current_hour = datetime.datetime.now().hour
-    if current_hour % 2 == 1:
-        ans = secure_coin_flip()
+def init_fixed_pattern():
+    """随机选择固定模式：1212 或 2121"""
+    if secrets.randbelow(2) == 0:
+        state.fixed_pattern = [1, 2, 1, 2]  # 1212模式
+        ZLog.i("已选择固定模式: 1212")
     else:
-        if state.last_choice is None or state.last_result is None:
-            ans = secure_coin_flip()
-        elif state.last_result == "win":
-            ans = state.last_choice
-        else:
-            if state.consecutive_losses in (2, 5):
-                ans = 2 if state.last_choice == 1 else 1
-            else:
-                ans = secure_coin_flip()
+        state.fixed_pattern = [2, 1, 2, 1]  # 2121模式
+        ZLog.i("已选择固定模式: 2121")
+
+def choose_bet_answer():
+    """
+    策略：
+    - 第1-4局：固定模式 (1212 或 2121)
+    - 第5-6局：安全随机
+    - 第7局：强制为1
+    - 第8局及以后：安全随机
+    """
+    # 局数计数器自增
+    state.round_counter += 1
+    
+    # 第1局时随机选择固定模式
+    if state.round_counter == 1:
+        init_fixed_pattern()
+    
+    # 前四局使用固定模式
+    if state.round_counter <= 4:
+        ans = state.fixed_pattern[state.round_counter - 1]
+        ZLog.d(f"第{state.round_counter}局 | 固定模式选择: {ans}")
+    elif state.round_counter <= 6:
+        # 第5-6局：安全随机
+        ans = secure_coin_flip()
+        ZLog.d(f"第{state.round_counter}局 | 安全随机选择: {ans}")
+    elif state.round_counter == 7:
+        # 第7局：强制为1
+        ans = 1
+        ZLog.d(f"第{state.round_counter}局 | 强制选择: {ans}")
+    else:
+        # 第8局及以后：安全随机
+        ans = secure_coin_flip()
+        ZLog.d(f"第{state.round_counter}局 | 安全随机选择: {ans}")
+    
     state.last_choice = ans
     return ans
 
 # ======================================
-# 胜负结算 - 使用实际金额判断
+# 胜负结算
 # ======================================
 def check_bet_result():
     html = get_game_record_html()
@@ -426,7 +472,7 @@ def check_bet_result():
         state.total_profit -= amount
         state.last_result = "lose"
         
-        # 输局：封顶则重置，否则按 2.1倍计算下一局投注
+        # 输局：封顶则重置，否则按 2.2倍计算下一局投注
         if is_max_bet_round:
             ZLog.w(f"封顶投注输了：强制重置为基础投注")
             state.total_lose_sum = 0
@@ -563,7 +609,7 @@ def send_bet():
     return True
 
 # ======================================
-# 等待结果 - 【已移除超时保护】无限等待直到开奖
+# 等待结果 - 无限等待直到开奖
 # ======================================
 def wait_result():
     poll_delay = 0
@@ -646,7 +692,9 @@ def save_game_state():
             "save_date": state.save_date,
             "current_challenger": state.current_challenger,
             "total_lose_sum": state.total_lose_sum,
-            "last_challenger": state.last_challenger
+            "last_challenger": state.last_challenger,
+            "round_counter": state.round_counter,
+            "fixed_pattern": state.fixed_pattern
         }
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -672,6 +720,11 @@ def load_game_state():
         state.current_challenger = data.get("current_challenger", "")
         state.total_lose_sum = data.get("total_lose_sum", 0)
         state.last_challenger = data.get("last_challenger", "")
+        
+        # 加载局数计数器和固定模式
+        state.round_counter = data.get("round_counter", 0)
+        state.fixed_pattern = data.get("fixed_pattern", [1, 2, 1, 2])
+        
         if state.save_date != today:
             state.total_bet_amount = 0
             state.total_lose_sum = 0
@@ -679,6 +732,8 @@ def load_game_state():
             # 跨天重置投注基数
             state.real_bet = CONFIG["base_bet"]
             state.target_bet = CONFIG["base_bet"]
+            # 跨天重置局数计数器
+            state.round_counter = 0
         else:
             state.total_bet_amount = data.get("total_bet_amount", 0)
     except:
@@ -696,11 +751,16 @@ def safe_exit():
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - 优化版 v2.1")
-    ZLog.i("✓ 每局输掉后下局投注 = 上局 × 2.1倍")
+    ZLog.i("妖火吹牛 - 优化版 v3.3")
+    ZLog.i("✓ 每局输掉后下局投注 = 上局 × 2.2倍")
     ZLog.i("✓ 支持手动大额投注自动识别")
     ZLog.i("✓ 实际金额判断封顶投注")
     ZLog.i("✓ 无限等待结果（无超时）")
+    ZLog.i("✓ 前4局固定1212/2121模式")
+    ZLog.i("✓ 第5-6局安全随机")
+    ZLog.i("✓ 第7局强制为1")
+    ZLog.i("✓ 第8局起安全随机选择")
+    ZLog.i("✓ 第3局起投注随机±(0-500×倍数)")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -715,6 +775,7 @@ def main():
     state.base_bet = CONFIG["base_bet"]
 
     ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']} | 连败倍率:{CONFIG['lose_multiple']}")
+    ZLog.i(f"当前已进行局数: {state.round_counter} | 模式: {'固定模式' if state.round_counter <= 4 else '安全随机'}")
 
     try:
         while state.is_running:
