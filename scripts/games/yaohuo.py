@@ -2,14 +2,14 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛-π策略版
+name: 妖火吹牛
 tag: 游戏,妖火
 instance: single
 
 """
-# 变量声明 （可设置在docker环境变量）
+# 变量声明
 """
-@env YH_COOKIE= 妖火Cookie 
+@env YH_COOKIE= 妖火Cookie
 @env YH_PASSWORD= 你的妖火密码
 """
 # 依赖声明
@@ -35,44 +35,17 @@ from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
 # ======================================
-# π小数点后1000位（用于投注策略，奇数选1，偶数选2）
-# ======================================
-PI_1000_DIGITS = (
-    "14159265358979323846264338327950288419716939937510"
-    "58209749445923078164062862089986280348253421170679"
-    "82148086513282306647093844609550582231725359408128"
-    "48111745028410270193852110555964462294895493038196"
-    "44288109756659334461284756482337867831652712019091"
-    "45648566923460348610454326648213393607260249141273"
-    "72458700660631558817488152092096282925409171536436"
-    "78925903600113305305488204665213841469519415116094"
-    "33057270365759591953092186117381932611793105118548"
-    "07446237996274956735188575272489122793818301194912"
-    "98336733624406566430860213949463952247371907021798"
-    "60943702770539217176293176752384674818467669405132"
-    "00056812714526356082778577134275778960917363717872"
-    "14684409012249534301465495853710507922796892589235"
-    "42019956112129021960864034418159813629774771309960"
-    "51870721134999999837297804995105973173281609631859"
-    "50244594553469083026425223082533446850352619311881"
-    "71010003137838752886587533208381420617177669147303"
-    "59825349042875546873115956286388235378759375195778"
-    "18577805321712268066130019278766111959092164201989"
-)
-
-# ======================================
 # 青龙环境变量
 # ======================================
 COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 369,           # 基础投注
-    "max_bet": 1000000,         # 单次最大投注
-    "lose_multiple": 2.2,      # 连败倍率 2.2倍
-    "max_network_errors": 10,  # 网络错误超限次数
-    "request_retries": 5,      # 单接口请求重试次数
-    "request_timeout": 20,    # 请求超时时间
+    "base_bet": 1000,           # 基础投注
+    "max_bet": 130000,          # 单次最大投注
+    "max_network_errors": 10,   # 网络错误超限次数
+    "request_retries": 5,       # 单接口请求重试次数
+    "request_timeout": 20,      # 请求超时时间
 }
 
 # 路径常量
@@ -143,9 +116,6 @@ class GameState:
         self.last_challenger = ""
 
         self.balance_low_notified = False
-        
-        # π策略：局数计数器
-        self.round_counter = 0
 
     @staticmethod
     def get_today():
@@ -249,34 +219,6 @@ def gen_dynamic_question():
 # ======================================
 def secure_coin_flip():
     return 1 if secrets.randbelow(2) == 0 else 2
-
-# ======================================
-# 【π策略】选择答案 - 唯一修改的地方！
-# ======================================
-def choose_bet_answer():
-    """
-    π策略：
-    - 第N局 = π小数点后第N位数字
-    - 奇数 → 选1
-    - 偶数 → 选2
-    - 超过1000局自动从头循环
-    - 跨天自动从第1局重新开始
-    """
-    # 局数计数器自增
-    state.round_counter += 1
-    
-    # 获取对应的π数字（超过1000则循环）
-    pi_index = (state.round_counter - 1) % len(PI_1000_DIGITS)
-    pi_digit = int(PI_1000_DIGITS[pi_index])
-    
-    # 奇数选1，偶数选2
-    ans = 1 if pi_digit % 2 == 1 else 2
-    
-    cycle_info = f" (循环第{(state.round_counter - 1) // 1000 + 1}轮)" if state.round_counter > 1000 else ""
-    ZLog.d(f"第{state.round_counter}局 | π第{pi_index + 1}位={pi_digit} | {'奇→选1' if pi_digit % 2 == 1 else '偶→选2'}{cycle_info}")
-    
-    state.last_choice = ans
-    return ans
 
 # ======================================
 # 用户ID & 余额
@@ -388,26 +330,22 @@ def parse_game_records(html):
         return []
 
 # ======================================
-# 投注金额计算：上一局 * 2.2 + 随机加减
+# 投注金额计算
 # ======================================
 def calc_real_bet():
-    # 基础计算：当前目标投注 = 上一局投注 * 2.2
-    next_bet = state.real_bet * CONFIG["lose_multiple"]
-    
-    # 第三局以后，随机加减 0-500 * 倍数
-    if state.round_counter >= 3:
-        random_base = random.randint(0, 500)
-        random_adjust = int(random_base * CONFIG["lose_multiple"])
-        if random.choice([True, False]):
-            next_bet += random_adjust
-            ZLog.d(f"投注随机 +{random_adjust}")
-        else:
-            next_bet -= random_adjust
-            ZLog.d(f"投注随机 -{random_adjust}")
-    
+    next_bet = state.total_lose_sum + state.base_bet
     final_int = int(next_bet)
     final_int = max(min(final_int, CONFIG["max_bet"]), CONFIG["base_bet"])
     return final_int
+
+# ======================================
+# 选择答案 - 已修改为完全随机
+# ======================================
+def choose_bet_answer():
+    # 完全随机选择1或2，不考虑任何历史结果和时间
+    ans = secure_coin_flip()
+    state.last_choice = ans
+    return ans
 
 # ======================================
 # 胜负结算 - 使用实际金额判断
@@ -446,6 +384,7 @@ def check_bet_result():
 
     ZLog.i(f"挑战者: {challenger}")
     
+    # 用实际结算金额判断是否封顶，支持手动大额投注
     is_max_bet_round = (amount >= CONFIG["max_bet"])
     
     if is_max_bet_round:
@@ -461,9 +400,9 @@ def check_bet_result():
         refresh_balance()
         ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
+        # 赢了：无论是否大额投注，全部重置
         state.total_lose_sum = 0
         state.target_bet = state.base_bet
-        state.real_bet = state.base_bet
 
     elif result == "lose":
         state.loss_count += 1
@@ -471,15 +410,14 @@ def check_bet_result():
         state.total_profit -= amount
         state.last_result = "lose"
         
+        # 输了：如果是封顶投注，强制重置；否则累加亏损
         if is_max_bet_round:
-            ZLog.w(f"封顶投注输了：强制重置为基础投注")
+            ZLog.w(f"封顶投注输了：不累计亏损，强制重置")
             state.total_lose_sum = 0
             state.target_bet = state.base_bet
-            state.real_bet = state.base_bet
         else:
             state.total_lose_sum += amount
             state.target_bet = calc_real_bet()
-            state.real_bet = state.target_bet
             
         refresh_balance()
         ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
@@ -489,6 +427,7 @@ def check_bet_result():
         state.last_bet_id = None
         return None
 
+    state.real_bet = state.target_bet
     state.last_bet_id = None
     save_game_state()
     refresh_balance()
@@ -499,7 +438,7 @@ def check_bet_result():
 # ======================================
 def check_config_valid():
     required_numeric = [
-        "base_bet", "max_bet", "lose_multiple",
+        "base_bet", "max_bet",
         "max_network_errors", "request_retries", "request_timeout",
     ]
     for key in required_numeric:
@@ -512,7 +451,7 @@ def check_config_valid():
     return True
 
 # ======================================
-# 带重试请求 - 完全保留v2.1原版
+# 带重试请求
 # ======================================
 def request_with_retry(url, method="GET", data=None):
     retry_max = CONFIG["request_retries"]
@@ -576,7 +515,7 @@ def send_bet():
     if state.current_balance < bet_amount:
         if not state.balance_low_notified:
             ZLog.e(f"余额不足 {format_money(state.current_balance)} < {format_money(bet_amount)}")
-        state.balance_low_notified = True
+            state.balance_low_notified = True
         time.sleep(10)
         return False
     state.balance_low_notified = False
@@ -607,7 +546,7 @@ def send_bet():
     return True
 
 # ======================================
-# 等待结果 - 无限等待直到开奖
+# 等待结果 - 【已移除超时保护】无限等待直到开奖
 # ======================================
 def wait_result():
     poll_delay = 0
@@ -672,7 +611,7 @@ def unlock_script():
         pass
 
 # ======================================
-# 状态保存/加载 - 新增round_counter
+# 状态保存/加载
 # ======================================
 def save_game_state():
     try:
@@ -690,8 +629,7 @@ def save_game_state():
             "save_date": state.save_date,
             "current_challenger": state.current_challenger,
             "total_lose_sum": state.total_lose_sum,
-            "last_challenger": state.last_challenger,
-            "round_counter": state.round_counter
+            "last_challenger": state.last_challenger
         }
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -717,15 +655,10 @@ def load_game_state():
         state.current_challenger = data.get("current_challenger", "")
         state.total_lose_sum = data.get("total_lose_sum", 0)
         state.last_challenger = data.get("last_challenger", "")
-        state.round_counter = data.get("round_counter", 0)
-        
         if state.save_date != today:
             state.total_bet_amount = 0
             state.total_lose_sum = 0
             state.save_date = today
-            state.real_bet = CONFIG["base_bet"]
-            state.target_bet = CONFIG["base_bet"]
-            state.round_counter = 0  # 跨天重置π计数器
         else:
             state.total_bet_amount = data.get("total_bet_amount", 0)
     except:
@@ -743,12 +676,11 @@ def safe_exit():
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - π策略版 v4.1")
-    ZLog.i("✓ 基于v2.1稳定版，网络代码100%兼容")
-    ZLog.i("✓ 答案选择：π小数点后N位，奇选1偶选2")
-    ZLog.i("✓ 内置π前1000位，1000局后自动循环")
-    ZLog.i("✓ 每局输掉后下局投注 = 上局 × 2.2倍")
-    ZLog.i("✓ 第3局起投注随机±(0-500×倍数)")
+    ZLog.i("妖火吹牛 - 纯随机版 v2.1")
+    ZLog.i("✓ 完全随机选择答案")
+    ZLog.i("✓ 支持手动大额投注自动识别")
+    ZLog.i("✓ 实际金额判断封顶投注")
+    ZLog.i("✓ 无限等待结果（无超时）")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -762,8 +694,7 @@ def main():
     state.is_running = True
     state.base_bet = CONFIG["base_bet"]
 
-    ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']} | 连败倍率:{CONFIG['lose_multiple']}")
-    ZLog.i(f"当前已进行局数: {state.round_counter} | 对应π第{state.round_counter % 1000 + 1}位")
+    ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']}")
 
     try:
         while state.is_running:
@@ -776,6 +707,7 @@ def main():
                 round_delay()
             else:
                 if send_bet():
+                    # 脚本自动投注封顶时，跳过等待直接下一局
                     if state.real_bet >= CONFIG["max_bet"]:
                         ZLog.w(f"脚本自动投注已达上限{format_money(CONFIG['max_bet'])}，跳过等待直接下一局")
                         state.total_lose_sum = 0
