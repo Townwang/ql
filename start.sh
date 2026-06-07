@@ -1,26 +1,18 @@
 #!/bin/bash
-set -e
 
-# 1. 先启动青龙后台，让它初始化完成
+# 后台启动青龙
 /ql/start.sh &
-QL_PID=$!
+sleep 25
 
-# 2. 等待青龙初始化（关键！不然 ql repo 找不到命令/目录）
-echo "⏳ 等待青龙初始化..."
-sleep 20
+# ========== 在这里修改为你的订阅地址 ==========
+SUB_URL="https://github.com/Townwang/ql.git"
+# ============================================
 
-# 3. 配置 git（避免首次提交报错）
-git config --global user.name "render"
-git config --global user.email "render@example.com"
+# 写入青龙订阅配置（重启不丢失，面板订阅管理可见）
+ql config repo add "$SUB_URL"
 
-# 4. 执行订阅（这里写你自己的仓库！）
-echo "📦 开始添加订阅..."
-ql repo https://github.com/Townwang/ql.git "" "" "" main
+# 拉取订阅脚本
+ql repo "$SUB_URL" "" "" "" main
 
-# 多仓库示例（取消注释用）
-# ql repo https://github.com/xxx/xxx.git "jd_|jx_" "backUp" "^jd[^_]|USER" main
-
-echo "✅ 订阅执行完毕"
-
-# 5. 保持前台运行，防止容器退出
-wait $QL_PID
+# 前台保持运行
+wait
