@@ -8,6 +8,6 @@ RUN apt-get update && apt-get install -y \
 # 暴露青龙面板端口
 EXPOSE 5700
 # 设置容器启动时执行我们的自定义脚本
-CMD ["/ql/start.sh"]
+CMD ["start.sh"]
 # 数据持久化
 COPY ./scripts /ql/scripts
