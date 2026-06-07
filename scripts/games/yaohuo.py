@@ -41,11 +41,16 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 1000,           # 基础投注
-    "max_bet": 130000,          # 单次最大投注
-    "max_network_errors": 10,   # 网络错误超限次数
-    "request_retries": 5,       # 单接口请求重试次数
-    "request_timeout": 20,      # 请求超时时间
+    "base_bet_phase1": 1000,      # 第一阶段(前十局)基础投注
+    "base_bet_phase2": 10000,     # 第二阶段基础投注
+    "phase1_rounds": 10,          # 第一阶段局数
+    "phase1_loss_threshold": 5000,# 第一阶段累计输阈值
+    "global_loss_threshold": 200000, # 全局累计输阈值(50万)
+    "multiplier": 2.1,            # 连败倍数
+    "random_deduct_max": 1000,    # 第二阶段随机减去的最大金额
+    "max_network_errors": 10,     # 网络错误超限次数
+    "request_retries": 5,         # 单接口请求重试次数
+    "request_timeout": 20,        # 请求超时时间
 }
 
 # 路径常量
@@ -91,18 +96,30 @@ class GameState:
         self.is_running = True
         self.network_error_count = 0
 
-        self.base_bet = CONFIG["base_bet"]
-        self.total_lose_sum = 0
-        self.target_bet = self.base_bet
-        self.real_bet = self.base_bet
-        self.consecutive_losses = 0
+        # 核心规则状态
+        self.current_phase = 1  # 1: 前十局阶段 2: 高倍投注阶段
+        self.phase1_round_count = 0  # 第一阶段已进行局数
+        self.phase1_total_loss = 0   # 第一阶段累计输
+        self.global_total_loss = 0   # 全局累计输
+        self.consecutive_losses = 0  # 连续输次数
+        self.current_bet = CONFIG["base_bet_phase1"]  # 当前投注金额
 
+        # 第二阶段状态
+        self.phase2_fixed_choice = None  # 第二阶段固定选择的结果(1/2)
+
+        # 全局强制状态(累计输>50万时触发)
+        self.is_global_force_mode = False  # 是否处于全局强制模式
+        self.global_force_choice = None    # 全局强制模式下的选择
+        self.global_force_rounds = 0       # 全局强制模式下已进行的局数
+
+        # 统计信息
         self.win_count = 0
         self.loss_count = 0
         self.total_profit = 0
         self.total_bet_amount = 0
         self.total_runs = 0
 
+        # 游戏状态
         self.last_bet_id = None
         self.last_ongoing_ids = None
         self.last_result = None
@@ -146,7 +163,9 @@ session.headers.update(REQUEST_HEADERS)
 def format_money(num):
     try:
         n = int(num)
-        if n >= 10000:
+        if n >= 100000000:
+            return f"{n / 100000000:.2f}亿"
+        elif n >= 10000:
             return f"{n / 10000:.1f}万"
         else:
             return f"{n}"
@@ -330,25 +349,67 @@ def parse_game_records(html):
         return []
 
 # ======================================
-# 投注金额计算
+# 重置第一阶段(所有状态清零)
 # ======================================
-def calc_real_bet():
-    next_bet = state.total_lose_sum + state.base_bet
-    final_int = int(next_bet)
-    final_int = max(min(final_int, CONFIG["max_bet"]), CONFIG["base_bet"])
-    return final_int
+def reset_phase1():
+    state.current_phase = 1
+    state.phase1_round_count = 0
+    state.phase1_total_loss = 0
+    state.consecutive_losses = 0
+    state.current_bet = CONFIG["base_bet_phase1"]
+    state.phase2_fixed_choice = None
+    state.is_global_force_mode = False
+    state.global_force_choice = None
+    state.global_force_rounds = 0
+    ZLog.i("✅ 已完全重置为第一阶段(前十局)，重新开始统计")
 
 # ======================================
-# 选择答案 - 已修改为完全随机
+# 投注金额计算 - 已移除所有最大投注限制
+# ======================================
+def calc_real_bet():
+    if state.current_phase == 1:
+        # 第一阶段固定1000
+        return CONFIG["base_bet_phase1"]
+    else:
+        # 第二阶段：第一局1万，后续每输一局×2.3倍，减去0-1000随机数
+        # 无任何最大投注限制
+        if state.consecutive_losses == 0:
+            bet = CONFIG["base_bet_phase2"]
+        else:
+            bet = state.current_bet * CONFIG["multiplier"]
+            # 减去0-1000的随机整数
+            deduct = random.randint(0, CONFIG["random_deduct_max"])
+            bet = max(bet - deduct, CONFIG["base_bet_phase2"])  # 不低于基础投注
+        
+        bet = int(bet)
+        return bet
+
+# ======================================
+# 选择答案 - 新规则
 # ======================================
 def choose_bet_answer():
-    # 完全随机选择1或2，不考虑任何历史结果和时间
-    ans = secure_coin_flip()
+    # 全局强制模式优先级最高
+    if state.is_global_force_mode:
+        if state.global_force_choice is None:
+            # 进入全局强制模式时重新随机一次结果
+            state.global_force_choice = secure_coin_flip()
+            ZLog.w(f"🔥 全局强制模式：重新随机选择结果 {state.global_force_choice}")
+        ans = state.global_force_choice
+    elif state.current_phase == 2:
+        # 第二阶段：进入时随机一次，后续固定使用
+        if state.phase2_fixed_choice is None:
+            state.phase2_fixed_choice = secure_coin_flip()
+            ZLog.w(f"进入第二阶段：固定选择结果 {state.phase2_fixed_choice}")
+        ans = state.phase2_fixed_choice
+    else:
+        # 第一阶段：完全随机
+        ans = secure_coin_flip()
+    
     state.last_choice = ans
     return ans
 
 # ======================================
-# 胜负结算 - 使用实际金额判断
+# 胜负结算 - 核心规则实现
 # ======================================
 def check_bet_result():
     html = get_game_record_html()
@@ -384,50 +445,75 @@ def check_bet_result():
 
     ZLog.i(f"挑战者: {challenger}")
     
-    # 用实际结算金额判断是否封顶，支持手动大额投注
-    is_max_bet_round = (amount >= CONFIG["max_bet"])
+    # 触发全局强制模式(累计输>50万且未进入该模式)
+    if state.global_total_loss > CONFIG["global_loss_threshold"] and not state.is_global_force_mode:
+        ZLog.w(f"⚠️ 全局累计输{format_money(state.global_total_loss)} > 50万！")
+        ZLog.w(f"⚠️ 进入全局强制模式：重新随机结果，最多进行3局")
+        state.is_global_force_mode = True
+        state.global_force_rounds = 0
+        state.global_force_choice = None  # 下次选择时自动重新随机
     
-    if is_max_bet_round:
-        ZLog.w(f"检测到大额投注: {format_money(amount)} >= 上限 {format_money(CONFIG['max_bet'])}")
-        ZLog.w(f"无论输赢，下局都强制重置为基础投注 {format_money(CONFIG['base_bet'])}")
-
     if result == "win":
         state.win_count += 1
-        state.consecutive_losses = 0
         state.total_profit += amount
         state.last_result = "win"
         state.balance_low_notified = False
         refresh_balance()
-        ZLog.s(f"胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
+        ZLog.s(f"✅ 胜: {format_money(amount)} | 余: {format_money(state.current_balance)}")
         
-        # 赢了：无论是否大额投注，全部重置
-        state.total_lose_sum = 0
-        state.target_bet = state.base_bet
+        # 任何时候赢了，立即重置回第一阶段
+        reset_phase1()
 
     elif result == "lose":
         state.loss_count += 1
-        state.consecutive_losses += 1
         state.total_profit -= amount
         state.last_result = "lose"
+        state.consecutive_losses += 1
         
-        # 输了：如果是封顶投注，强制重置；否则累加亏损
-        if is_max_bet_round:
-            ZLog.w(f"封顶投注输了：不累计亏损，强制重置")
-            state.total_lose_sum = 0
-            state.target_bet = state.base_bet
-        else:
-            state.total_lose_sum += amount
-            state.target_bet = calc_real_bet()
+        # 更新全局累计输
+        state.global_total_loss += amount
+        
+        # 处理全局强制模式逻辑
+        if state.is_global_force_mode:
+            state.global_force_rounds += 1
+            ZLog.w(f"🔥 全局强制模式第{state.global_force_rounds}局 | 连败: {state.consecutive_losses} | 全局累计输: {format_money(state.global_total_loss)}")
             
+            # 连续输3局，强制重置回第一阶段
+            if state.global_force_rounds >= 3:
+                ZLog.w(f"⚠️ 全局强制模式连续输3局，强制重置回第一阶段")
+                reset_phase1()
+        else:
+            # 处理正常阶段逻辑
+            if state.current_phase == 1:
+                state.phase1_total_loss += amount
+                state.phase1_round_count += 1
+                ZLog.w(f"第一阶段第{state.phase1_round_count}局 | 阶段累计输: {format_money(state.phase1_total_loss)}")
+                
+                # 第一阶段完成10局后判断
+                if state.phase1_round_count >= CONFIG["phase1_rounds"]:
+                    if state.phase1_total_loss > CONFIG["phase1_loss_threshold"]:
+                        # 累计输>5000，进入第二阶段
+                        state.current_phase = 2
+                        state.consecutive_losses = 0  # 第二阶段重新计算连败
+                        state.phase2_fixed_choice = None  # 下次选择时自动随机
+                        ZLog.w(f"第一阶段累计输{format_money(state.phase1_total_loss)} > 5000，进入第二阶段")
+                    else:
+                        # 累计输≤5000，完全重置第一阶段
+                        ZLog.i(f"第一阶段累计输{format_money(state.phase1_total_loss)} ≤ 5000，完全重置第一阶段")
+                        reset_phase1()
+            else:
+                # 第二阶段正常连败
+                ZLog.w(f"第二阶段连败: {state.consecutive_losses} | 全局累计输: {format_money(state.global_total_loss)}")
+        
         refresh_balance()
-        ZLog.w(f"连败: {state.consecutive_losses} | 累计亏损总和: {format_money(state.total_lose_sum)}")
-        ZLog.e(f"败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
+        ZLog.e(f"❌ 败: {format_money(amount)} | 余: {format_money(state.current_balance)}")
 
     else:
         state.last_bet_id = None
         return None
 
-    state.real_bet = state.target_bet
+    # 计算下一局投注金额
+    state.current_bet = calc_real_bet()
     state.last_bet_id = None
     save_game_state()
     refresh_balance()
@@ -438,8 +524,10 @@ def check_bet_result():
 # ======================================
 def check_config_valid():
     required_numeric = [
-        "base_bet", "max_bet",
-        "max_network_errors", "request_retries", "request_timeout",
+        "base_bet_phase1", "base_bet_phase2", "phase1_rounds",
+        "phase1_loss_threshold", "global_loss_threshold", "multiplier",
+        "random_deduct_max", "max_network_errors",
+        "request_retries", "request_timeout",
     ]
     for key in required_numeric:
         val = CONFIG.get(key)
@@ -510,7 +598,7 @@ def verify_password():
 def send_bet():
     if not state.user_id:
         return False
-    bet_amount = state.real_bet
+    bet_amount = state.current_bet
     refresh_balance()
     if state.current_balance < bet_amount:
         if not state.balance_low_notified:
@@ -542,11 +630,19 @@ def send_bet():
     if records:
         state.last_bet_id = records[0]["id"]
     state.total_bet_amount += bet_amount
-    ZLog.d(f"投 {format_money(bet_amount)} 选 {str(choose)}")
+    
+    # 显示当前阶段和选择信息
+    if state.is_global_force_mode:
+        phase_info = f"🔥 全局强制模式(第{state.global_force_rounds+1}/3局，固定选{state.global_force_choice})"
+    elif state.current_phase == 2:
+        phase_info = f"第二阶段(固定选{state.phase2_fixed_choice}，2.3倍递增，无上限)"
+    else:
+        phase_info = "第一阶段(前十局，随机选号)"
+    ZLog.d(f"[{phase_info}] 投 {format_money(bet_amount)} 选 {str(choose)}")
     return True
 
 # ======================================
-# 等待结果 - 【已移除超时保护】无限等待直到开奖
+# 等待结果 - 无限等待直到开奖
 # ======================================
 def wait_result():
     poll_delay = 0
@@ -564,6 +660,7 @@ def wait_result():
 # 延迟
 # ======================================
 def round_delay():
+    # 保留原有的连败延迟逻辑
     if state.last_result == "win":
         return
     if state.consecutive_losses < 10:
@@ -616,9 +713,16 @@ def unlock_script():
 def save_game_state():
     try:
         data = {
-            "target_bet": state.target_bet,
-            "real_bet": state.real_bet,
+            "current_phase": state.current_phase,
+            "phase1_round_count": state.phase1_round_count,
+            "phase1_total_loss": state.phase1_total_loss,
+            "global_total_loss": state.global_total_loss,
             "consecutive_losses": state.consecutive_losses,
+            "current_bet": state.current_bet,
+            "phase2_fixed_choice": state.phase2_fixed_choice,
+            "is_global_force_mode": state.is_global_force_mode,
+            "global_force_choice": state.global_force_choice,
+            "global_force_rounds": state.global_force_rounds,
             "win_count": state.win_count,
             "loss_count": state.loss_count,
             "total_profit": state.total_profit,
@@ -628,7 +732,6 @@ def save_game_state():
             "last_choice": state.last_choice,
             "save_date": state.save_date,
             "current_challenger": state.current_challenger,
-            "total_lose_sum": state.total_lose_sum,
             "last_challenger": state.last_challenger
         }
         with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -643,9 +746,16 @@ def load_game_state():
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         today = state.get_today()
-        state.target_bet = data.get("target_bet", CONFIG["base_bet"])
-        state.real_bet = data.get("real_bet", CONFIG["base_bet"])
+        state.current_phase = data.get("current_phase", 1)
+        state.phase1_round_count = data.get("phase1_round_count", 0)
+        state.phase1_total_loss = data.get("phase1_total_loss", 0)
+        state.global_total_loss = data.get("global_total_loss", 0)
         state.consecutive_losses = data.get("consecutive_losses", 0)
+        state.current_bet = data.get("current_bet", CONFIG["base_bet_phase1"])
+        state.phase2_fixed_choice = data.get("phase2_fixed_choice", None)
+        state.is_global_force_mode = data.get("is_global_force_mode", False)
+        state.global_force_choice = data.get("global_force_choice", None)
+        state.global_force_rounds = data.get("global_force_rounds", 0)
         state.win_count = data.get("win_count", 0)
         state.loss_count = data.get("loss_count", 0)
         state.total_profit = data.get("total_profit", 0)
@@ -653,11 +763,10 @@ def load_game_state():
         state.last_choice = data.get("last_choice")
         state.save_date = data.get("save_date", today)
         state.current_challenger = data.get("current_challenger", "")
-        state.total_lose_sum = data.get("total_lose_sum", 0)
         state.last_challenger = data.get("last_challenger", "")
+        
         if state.save_date != today:
             state.total_bet_amount = 0
-            state.total_lose_sum = 0
             state.save_date = today
         else:
             state.total_bet_amount = data.get("total_bet_amount", 0)
@@ -676,11 +785,14 @@ def safe_exit():
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - 纯随机版 v2.1")
-    ZLog.i("✓ 完全随机选择答案")
-    ZLog.i("✓ 支持手动大额投注自动识别")
-    ZLog.i("✓ 实际金额判断封顶投注")
-    ZLog.i("✓ 无限等待结果（无超时）")
+    ZLog.i("妖火吹牛 - 自定义规则最终版 v2.5")
+    ZLog.i("✓ 第一阶段：前十局固定1000随机选号")
+    ZLog.i("✓ 十局输>5000进入第二阶段，否则完全重置")
+    ZLog.i("✓ 第二阶段：随机固定结果，1万起投2.3倍递增")
+    ZLog.i("✓ 第二阶段每局随机减0-1000，赢了立即重置")
+    ZLog.i("✓ 全局输>50万：强制重随结果，最多3局")
+    ZLog.i("✓ 全局模式赢一局或连输3局都重置回第一阶段")
+    ZLog.i("✓ 已移除所有最大投注限制，金额无限递增")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -692,9 +804,21 @@ def main():
     state.last_bet_id = None
     state.last_ongoing_ids = None
     state.is_running = True
-    state.base_bet = CONFIG["base_bet"]
 
-    ZLog.i(f"基础投注:{CONFIG['base_bet']} | 最大投注:{CONFIG['max_bet']}")
+    # 显示启动时的当前状态
+    ZLog.i(f"全局累计输: {format_money(state.global_total_loss)}")
+    if state.is_global_force_mode:
+        phase_info = f"🔥 全局强制模式(第{state.global_force_rounds}/3局，固定选{state.global_force_choice})"
+        ZLog.i(f"当前状态: {phase_info}")
+        ZLog.i(f"当前连败: {state.consecutive_losses} | 当前投注: {format_money(state.current_bet)}")
+    elif state.current_phase == 2:
+        phase_info = f"第二阶段(固定选{state.phase2_fixed_choice}，2.3倍递增，无上限)"
+        ZLog.i(f"当前状态: {phase_info}")
+        ZLog.i(f"第二阶段连败: {state.consecutive_losses} | 当前投注: {format_money(state.current_bet)}")
+    else:
+        phase_info = "第一阶段(前十局，随机选号)"
+        ZLog.i(f"当前状态: {phase_info}")
+        ZLog.i(f"第一阶段进度: {state.phase1_round_count}/10 | 阶段累计输: {format_money(state.phase1_total_loss)}")
 
     try:
         while state.is_running:
@@ -707,18 +831,8 @@ def main():
                 round_delay()
             else:
                 if send_bet():
-                    # 脚本自动投注封顶时，跳过等待直接下一局
-                    if state.real_bet >= CONFIG["max_bet"]:
-                        ZLog.w(f"脚本自动投注已达上限{format_money(CONFIG['max_bet'])}，跳过等待直接下一局")
-                        state.total_lose_sum = 0
-                        state.target_bet = CONFIG["base_bet"]
-                        state.real_bet = CONFIG["base_bet"]
-                        state.last_bet_id = None
-                        state.last_result = None
-                        save_game_state()
-                    else:
-                        wait_result()
-                        round_delay()
+                    wait_result()
+                    round_delay()
                     state.total_runs += 1
             
             if not ongoing and not state.last_bet_id:
@@ -735,8 +849,9 @@ def main():
         win_rate = f"{state.win_count / total * 100:.1f}%" if total > 0 else "0.0%"
         ZLog.i("=" * 20)
         ZLog.i(f"总轮次:{total} 胜:{state.win_count} 负:{state.loss_count} 胜率:{win_rate}")
-        ZLog.i(f"总盈亏:{state.total_profit} 今日投注:{state.total_bet_amount}")
-        ZLog.d(f"最终余额:{state.current_balance}")
+        ZLog.i(f"总盈亏:{format_money(state.total_profit)} 今日投注:{format_money(state.total_bet_amount)}")
+        ZLog.i(f"全局累计输:{format_money(state.global_total_loss)}")
+        ZLog.d(f"最终余额:{format_money(state.current_balance)}")
         ZLog.i("=" * 20)
 
 if __name__ == "__main__":
