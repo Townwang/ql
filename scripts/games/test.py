@@ -4,8 +4,8 @@
 # name: 吹牛测试任务
 # tag: 游戏,妖火
 # instance: boot
-# @env YH_COOKIE= 妖火Cookie
-# @env YH_PASSWORD= 你的妖火密码
+# @env YH_COOKIETEST= 妖火Cookie
+# @env YH_PASSWORTESTD= 你的妖火密码
 # @pip requests
 # @pip plyer
 # @pip Crypto
