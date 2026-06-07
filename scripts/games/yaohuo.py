@@ -273,9 +273,6 @@ def choose_bet_answer():
         ans = 1
     else:
         ans = 2
-    
-    cycle_info = f" (循环第{(state.round_counter - 1) // len(PI_1000_DIGITS) + 1}轮)" if state.round_counter > len(PI_1000_DIGITS) else ""
-    
     state.last_choice = ans
     return ans
 
