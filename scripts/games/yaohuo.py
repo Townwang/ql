@@ -647,7 +647,7 @@ def send_bet():
     elif state.current_phase == 2:
         phase_info = f"②(固定选{state.phase2_fixed_choice}，2.1倍递增，无上限)"
     else:
-        phase_info = f"①(第{state.phase1_round_count+1}/10局，随机选号)"
+        phase_info = f"①(第{state.phase1_round_count+1}/10局)"
     ZLog.d(f"[{phase_info}] 投 {format_money(bet_amount)} 选 {str(choose)}")
     return True
 
@@ -826,7 +826,7 @@ def main():
         ZLog.i(f"当前状态: {phase_info}")
         ZLog.i(f"②连败: {state.consecutive_losses} | 当前投注: {format_money(state.current_bet)}")
     else:
-        phase_info = f"①(第{state.phase1_round_count+1}/10局，随机选号)"
+        phase_info = f"①(第{state.phase1_round_count+1}/10局)"
         ZLog.i(f"当前状态: {phase_info}")
         ZLog.i(f"①累计输: {format_money(state.phase1_total_loss)}")
 
