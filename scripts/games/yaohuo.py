@@ -67,8 +67,8 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet": 666,           # 基础投注
-    "max_bet": 365380,         # 单次最大投注
+    "base_bet": 369,           # 基础投注
+    "max_bet": 1000000,         # 单次最大投注
     "lose_multiple": 2.2,      # 连败倍率 2.2倍
     "max_network_errors": 10,  # 网络错误超限次数
     "request_retries": 5,      # 单接口请求重试次数
