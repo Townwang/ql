@@ -349,19 +349,20 @@ def parse_game_records(html):
         return []
 
 # ======================================
-# 重置第一阶段(所有状态清零)
+# 重置第一阶段(所有状态清零，包括全局累计输)
 # ======================================
 def reset_phase1():
     state.current_phase = 1
     state.phase1_round_count = 0
     state.phase1_total_loss = 0
+    state.global_total_loss = 0  # ✅ 全局累计输也重置
     state.consecutive_losses = 0
     state.current_bet = CONFIG["base_bet_phase1"]
     state.phase2_fixed_choice = None
     state.is_global_force_mode = False
     state.global_force_choice = None
     state.global_force_rounds = 0
-    ZLog.i("✅ 重置为第一阶段")
+    ZLog.i("✅ 已完全重置（全局累计输已清零）")
 
 # ======================================
 # 投注金额计算 - 已移除所有最大投注限制
@@ -463,10 +464,10 @@ def check_bet_result():
         # 【规则修正】第一阶段赢了不重置！
         # ======================================
         if state.is_global_force_mode:
-            # 全局强制模式赢了，立即重置
+            # 全局强制模式赢了，立即重置（含全局累计输清零）
             reset_phase1()
         elif state.current_phase == 2:
-            # 第二阶段赢了，立即重置回第一阶段
+            # 第二阶段赢了，立即重置回第一阶段（含全局累计输清零）
             reset_phase1()
         else:
             # 第一阶段赢了：不重置！继续进行第一阶段，只增加局数计数
@@ -485,7 +486,7 @@ def check_bet_result():
             state.global_force_rounds += 1
             ZLog.w(f"🔥 强制模式第{state.global_force_rounds}局 | 连败: {state.consecutive_losses} | 累计输: {format_money(state.global_total_loss)}")
             
-            # 连续输3局，强制重置回第一阶段
+            # 连续输3局，强制重置回第一阶段（含全局累计输清零）
             if state.global_force_rounds >= 3:
                 ZLog.w(f"⚠️ 强制重置回第一阶段")
                 reset_phase1()
@@ -508,7 +509,7 @@ def check_bet_result():
                         state.phase2_fixed_choice = None  # 下次选择时自动随机
                         ZLog.w(f"①累计输{format_money(state.phase1_total_loss)} > 5000")
                     else:
-                        # 累计输≤5000，完全重置第一阶段
+                        # 累计输≤5000，完全重置第一阶段（含全局累计输清零）
                         ZLog.i(f"①累计输{format_money(state.phase1_total_loss)} ≤ 5000，完全重置")
                         reset_phase1()
             else:
@@ -795,13 +796,14 @@ def safe_exit():
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - 规则修正版 v2.6")
+    ZLog.i("妖火吹牛 - 最终修正版 v2.7")
     ZLog.i("✓ 第一阶段：10局固定1000，中途输赢都不重置")
     ZLog.i("✓ 10局完成后统计：输>5000进第二阶段，否则重置")
     ZLog.i("✓ 第二阶段：随机固定结果，1万起投2.1倍递增")
     ZLog.i("✓ 第二阶段每局随机减0-1000，赢了立即重置")
     ZLog.i("✓ 全局输>20万：强制重随结果，最多3局")
     ZLog.i("✓ 全局模式赢一局或连输3局都重置回第一阶段")
+    ZLog.i("✓ ✅ 重置时全局累计输金额也清零")
     ZLog.i("✓ 已移除所有最大投注限制，金额无限递增")
     ZLog.i("=" * 20)
 
