@@ -275,7 +275,6 @@ def choose_bet_answer():
         ans = 2
     
     cycle_info = f" (循环第{(state.round_counter - 1) // len(PI_1000_DIGITS) + 1}轮)" if state.round_counter > len(PI_1000_DIGITS) else ""
-    ZLog.d(f"第{state.round_counter}局 | π第{pi_index + 1}位={pi_digit} | {'奇→选1' if pi_digit % 2 == 1 else '偶→选2'}{cycle_info}")
     
     state.last_choice = ans
     return ans
