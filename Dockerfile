@@ -5,9 +5,6 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     && pip3 install --no-cache-dir requests beautifulsoup4
-# 复制启动脚本
-COPY start.sh /ql/start.sh
-RUN chmod +x /ql/start.sh
 # 暴露青龙面板端口
 EXPOSE 5700
 # 设置容器启动时执行我们的自定义脚本
