@@ -2,16 +2,15 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛_优化版_无超时
+name: 妖火吹牛
 tag: 游戏,妖火
 instance: single
 
 """
-# 变量声明
+# 变量声明 （可设置在docker环境变量）
 """
-@env YH_COOKIE= 妖火Cookie
+@env YH_COOKIE= 妖火Cookie 
 @env YH_PASSWORD= 你的妖火密码
-@env YH_TEST= 测试
 """
 # 依赖声明
 """

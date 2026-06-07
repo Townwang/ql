@@ -7,7 +7,7 @@ tag: 游戏,妖火
 instance: single
 
 """
-# 变量声明
+# 变量声明 （可设置在docker环境变量）
 """
 @env YH_COOKIE= 妖火Cookie
 @env YH_PASSWORD= 你的妖火密码
