@@ -29,6 +29,7 @@ import requests
 import socket
 import time
 import re
+import traceback
 from bs4 import BeautifulSoup
 from typing import Dict, List, Optional, Set
 from requests.adapters import HTTPAdapter
@@ -164,8 +165,13 @@ def request_with_retry(url, method="GET", data=None, max_retries=3):
                 return None
             return resp
         except Exception as e:
+            # 网络/请求异常，打印详细堆栈
+            err_info = f"请求异常 地址:{url} 尝试次数:{attempt}/{max_retries} 错误:{str(e)}"
+            ZLog.e(err_info)
+            ZLog.e(traceback.format_exc())
             if attempt < max_retries:
                 time.sleep(0.5)
+    ZLog.e(f"请求最终失败: {url}")
     return None
 
 def verify_password():
@@ -180,7 +186,7 @@ def verify_password():
     return True
 
 # ======================================
-# 极速静默监控类 - 修复漏单
+# 极速静默监控类 - 修复漏单 + 网络异常详细日志
 # ======================================
 class YaohuoSpeedMonitor:
     def __init__(self):
@@ -188,10 +194,10 @@ class YaohuoSpeedMonitor:
         self.monitoring: Dict[str, Dict] = {}  # 正在监控的条目
     
     def get_all_ids(self) -> List[str]:
-        resp = request_with_retry(MONITOR_URL)
-        if not resp:
-            return []
         try:
+            resp = request_with_retry(MONITOR_URL)
+            if not resp:
+                return []
             soup = BeautifulSoup(resp.text, 'html.parser')
             ids = []
             for link in soup.find_all('a', href=re.compile(r'doit\.aspx\?id=\d+')):
@@ -199,7 +205,9 @@ class YaohuoSpeedMonitor:
                 if bid not in ids:
                     ids.append(bid)
             return sorted(ids, key=lambda x: int(x), reverse=True)
-        except:
+        except Exception as e:
+            ZLog.e("获取列表ID解析异常")
+            ZLog.e(traceback.format_exc())
             return []
     
     def get_detail(self, bid: str) -> Optional[Dict]:
@@ -247,7 +255,8 @@ class YaohuoSpeedMonitor:
             
             return res
         except Exception as e:
-            ZLog.w(f"解析[{bid}]异常: {e},本轮跳过,下次继续抓取")
+            ZLog.w(f"解析[{bid}]数据异常")
+            ZLog.e(traceback.format_exc())
             return None
     
     def print_result(self, detail, is_win):
@@ -260,7 +269,7 @@ class YaohuoSpeedMonitor:
         - 输字: 红色 (#e74c3c)
         - 结果文字: 黑色 (#000000)
         """
-        # 赢/输字颜色
+        # 修复原代码语法错误：detail() → detail
         win_lose_color = COLORS['green'] if is_win else COLORS['red']
         
         # 构建彩色日志行（已去掉时间戳！）
@@ -270,7 +279,7 @@ class YaohuoSpeedMonitor:
             f"注: {ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
             f"{detail['答案']} \n"
             f"应: {ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
-            f"选: {ZLog.color_part(detail('选择'), COLORS['grey'])} \n"
+            f"选: {ZLog.color_part(detail['选择'], COLORS['grey'])} \n"
             f"{ZLog.color_part(detail['结果'], win_lose_color)}"
         )
         
@@ -284,42 +293,47 @@ class YaohuoSpeedMonitor:
         if not verify_password():
             return
         while True:
-            # 1. 获取所有ID
-            all_ids = self.get_all_ids()
-            
-            # 2. 检查新ID，>=2w全部入监控【不再过滤进行中/已结束】
-            for bid in all_ids:
-                if bid in self.notified:
-                    continue
-                if bid not in self.monitoring:
+            try:
+                # 1. 获取所有ID
+                all_ids = self.get_all_ids()
+                
+                # 2. 检查新ID，>=2w全部入监控【不再过滤进行中/已结束】
+                for bid in all_ids:
+                    if bid in self.notified:
+                        continue
+                    if bid not in self.monitoring:
+                        detail = self.get_detail(bid)
+                        if not detail:
+                            continue
+                        bet_amount = parse_money(detail['赌注'])
+                        if bet_amount >= 20000:
+                            self.monitoring[bid] = detail
+                
+                # 3. 检查监控中的条目，开奖才输出
+                completed = []
+                for bid in list(self.monitoring.keys()):
                     detail = self.get_detail(bid)
                     if not detail:
                         continue
-                    bet_amount = parse_money(detail['赌注'])
-                    if bet_amount >= 20000:
-                        self.monitoring[bid] = detail
-            
-            # 3. 检查监控中的条目，开奖才输出
-            completed = []
-            for bid in list(self.monitoring.keys()):
-                detail = self.get_detail(bid)
-                if not detail:
-                    continue
-                if detail['状态'] == '已结束':
-                    result_text = detail['结果']
-                    is_win = '应战者胜出' in result_text or '发起者失败' in result_text
-                    # 输出日志
-                    self.print_result(detail, is_win)
-                    completed.append(bid)
-                    self.notified.add(bid)
-            
-            # 4. 播报成功后移除
-            for bid in completed:
-                print("="*30 + "\n")
-                del self.monitoring[bid]
-            
-            # 5. 使用环境变量配置间隔，不再固定0.1
-            time.sleep(POLL_INTERVAL)
+                    if detail['状态'] == '已结束':
+                        result_text = detail['结果']
+                        is_win = '应战者胜出' in result_text or '发起者失败' in result_text
+                        # 输出日志
+                        self.print_result(detail, is_win)
+                        completed.append(bid)
+                        self.notified.add(bid)
+                
+                # 4. 播报成功后移除
+                for bid in completed:
+                    print("="*30 + "\n")
+                    del self.monitoring[bid]
+                
+                # 5. 使用环境变量配置间隔，不再固定0.1
+                time.sleep(POLL_INTERVAL)
+            except Exception as e:
+                ZLog.e("主循环发生未知异常")
+                ZLog.e(traceback.format_exc())
+                time.sleep(POLL_INTERVAL)
 
 
 def main():

@@ -31,8 +31,10 @@ import os
 import re
 import atexit
 import random
+import traceback
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
+from requests.exceptions import RequestException, Timeout, ConnectionError, HTTPError
 
 # ======================================
 # 青龙环境变量
@@ -550,7 +552,7 @@ def check_config_valid():
     return True
 
 # ======================================
-# 带重试请求
+# 带重试请求【增强网络异常详细日志】
 # ======================================
 def request_with_retry(url, method="GET", data=None):
     retry_max = CONFIG["request_retries"]
@@ -565,24 +567,42 @@ def request_with_retry(url, method="GET", data=None):
             resp.raise_for_status()
             
             if "请先登录" in resp.text or "登录网站" in resp.text:
-                ZLog.e("登录已失效")
+                ZLog.e("【登录失效】页面提示需重新登录")
                 state.is_running = False
                 return None
             
             state.network_error_count = 0
             return resp
 
+        except Timeout:
+            err_type = "请求超时"
+            err_detail = f"URL: {url} | 超时时间: {timeout}s"
+        except ConnectionError:
+            err_type = "连接失败"
+            err_detail = f"URL: {url} | 无法建立网络连接/域名解析失败"
+        except HTTPError as e:
+            err_type = "HTTP状态码异常"
+            err_detail = f"URL: {url} | 状态码: {e.response.status_code if e.response else '未知'} | 响应片段: {(e.response.text[:200] if e.response else '')}"
+        except RequestException as e:
+            err_type = "通用网络请求异常"
+            err_detail = f"URL: {url} | 异常信息: {str(e)}"
         except Exception as e:
-            state.network_error_count += 1
-            delay_sec = state.network_error_count * 60
-            ZLog.w(f"第{attempt}次请求失败 | 累计网络错误{state.network_error_count}次 → 延迟{delay_sec//60}分钟后重试")
-            
-            if state.network_error_count >= CONFIG["max_network_errors"]:
-                ZLog.e("网络错误次数超限，脚本停止运行")
-                state.is_running = False
-                return None
-            
-            time.sleep(delay_sec)
+            err_type = "未知异常"
+            err_detail = f"URL: {url} | 异常信息: {str(e)}\n堆栈:\n{traceback.format_exc()}"
+
+        # 统一处理错误计数与日志
+        state.network_error_count += 1
+        delay_sec = state.network_error_count * 60
+        ZLog.e(f"【网络异常】第{attempt}/{retry_max}次 {method} 请求失败 | 类型: {err_type}")
+        ZLog.e(f"详情: {err_detail}")
+        ZLog.w(f"累计网络错误: {state.network_error_count} 次 → 延迟 {delay_sec//60} 分钟后重试")
+        
+        if state.network_error_count >= CONFIG["max_network_errors"]:
+            ZLog.e(f"网络错误次数达到上限 {CONFIG['max_network_errors']}，脚本终止")
+            state.is_running = False
+            return None
+        
+        time.sleep(delay_sec)
 
 # ======================================
 # 密码验证
@@ -796,7 +816,7 @@ def safe_exit():
 # ======================================
 def main():
     ZLog.i("=" * 20)
-    ZLog.i("妖火吹牛 - 最终修正版 v2.7")
+    ZLog.i("妖火吹牛 - 最终修正版 v2.7 + 网络异常详细日志")
     ZLog.i("✓ 第一阶段：10局固定1000，中途输赢都不重置")
     ZLog.i("✓ 10局完成后统计：输>5000进第二阶段，否则重置")
     ZLog.i("✓ 第二阶段：随机固定结果，1万起投2.1倍递增")
@@ -805,6 +825,7 @@ def main():
     ZLog.i("✓ 全局模式赢一局或连输3局都重置回第一阶段")
     ZLog.i("✓ ✅ 重置时全局累计输金额也清零")
     ZLog.i("✓ 已移除所有最大投注限制，金额无限递增")
+    ZLog.i("✓ 增强：网络异常输出URL、错误类型、堆栈、响应内容")
     ZLog.i("=" * 20)
 
     lock_script()
@@ -853,7 +874,7 @@ def main():
     except KeyboardInterrupt:
         ZLog.w("用户手动停止")
     except Exception as e:
-        ZLog.e(f"异常: {str(e)[:50]}")
+        ZLog.e(f"主线程异常: {str(e)[:200]}\n{traceback.format_exc()}")
     finally:
         safe_exit()
         save_game_state()
