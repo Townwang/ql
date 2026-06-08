@@ -2,7 +2,7 @@
 # ======================================
 # 添加任务
 """
-name: 妖火吹牛（10万本）
+name: 妖火吹牛（百万本）
 tag: 游戏,妖火
 instance: single
 
@@ -43,11 +43,11 @@ COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 CONFIG = {
-    "base_bet_phase1": 1000,      # 第一阶段(前十局)基础投注
-    "base_bet_phase2": 10000,     # 第二阶段基础投注
+    "base_bet_phase1": 10000,      # 第一阶段(前十局)基础投注
+    "base_bet_phase2": 99999,     # 第二阶段基础投注
     "phase1_rounds": 10,          # 第一阶段局数
-    "phase1_loss_threshold": 5000,# 第一阶段累计输阈值
-    "global_loss_threshold": 200000, # 全局累计输阈值(20万)
+    "phase1_loss_threshold": 50000,# 第一阶段累计输阈值
+    "global_loss_threshold": 2000000, # 全局累计输阈值(20万)
     "multiplier": 2.1,            # 连败倍数
     "random_deduct_max": 1000,    # 第二阶段随机减去的最大金额
     "max_network_errors": 10,     # 网络错误超限次数
