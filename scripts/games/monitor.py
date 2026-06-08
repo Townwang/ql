@@ -83,6 +83,7 @@ COLORS = {
     'red': '#e74c3c',       # 红色 - 输字
     'black': '#000000',     # 黑色 - 结果
     'white': '#ffffff',     # 白色 - 分隔符
+    'grey': '#efefef'       # 灰色
 }
 
 # ======================================
@@ -265,11 +266,11 @@ class YaohuoSpeedMonitor:
         # 构建彩色日志行（已去掉时间戳！）
         log_line = (
             f"[{detail['id']}] \n"
-            f"发:{ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
-            f"注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
+            f"发: {ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
+            f"注: {ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
             f"{detail['答案']} \n"
-            f"应:{ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
-            f"选择:{detail['选择']} \n"
+            f"应: {ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
+            f"选: {ZLog.color_part(detail('选择'), COLORS['grey'])} \n"
             f"{ZLog.color_part(detail['结果'], win_lose_color)}"
         )
         
