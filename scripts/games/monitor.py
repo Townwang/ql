@@ -264,12 +264,12 @@ class YaohuoSpeedMonitor:
         
         # 构建彩色日志行（已去掉时间戳！）
         log_line = (
-            f"[{detail['id']}] | "
+            f"[{detail['id']}] \n"
             f"发:{ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
             f"注:{ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
             f"{detail['答案']} \n"
             f"应:{ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
-            f"选择:{detail['选择']} | "
+            f"选择:{detail['选择']} \n"
             f"{ZLog.color_part(detail['结果'], win_lose_color)}"
         )
         
@@ -277,7 +277,7 @@ class YaohuoSpeedMonitor:
     
     def run(self):
         print("\n" + "="*30)
-        print("🚀 妖火吹牛 - 极速静默监控【修复漏单版】")
+        print("妖火吹牛 - 极速静默监控")
         print("="*30 + "\n")
         
         if not verify_password():
