@@ -211,10 +211,10 @@ class ZLog:
 # 挑衅话术
 # ======================================
 def get_win_provoke_words():
-    return [f"在座的各位都是垃圾（100000妖精）            "]
+    return [f"在座的各位都是垃圾ᅟ（100000妖精） ᅟᅟᅟᅟᅟᅟᅟᅟᅟ   "]
 
 def get_lose_provoke_words():
-    return [f"错了错了错了错了错了（10000000妖精）        "]
+    return [f"错了错了错了错了ᅟ（1000000妖精）     ᅟᅟᅟᅟᅟᅟ   "]
 
 def get_default_provoke_words():
     return ["🥺🥺🥺🥺🥺🥺"]
