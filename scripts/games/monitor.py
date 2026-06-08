@@ -123,7 +123,7 @@ session.mount('https://', TCPOptimizedAdapter(pool_connections=30, pool_maxsize=
 REQUEST_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Connection': 'keep-alive',
+    'Connection': 'close',
     'Cookie': COOKIE,
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
