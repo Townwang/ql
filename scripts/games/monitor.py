@@ -11,8 +11,9 @@ instance: single
 """
 @env YH_COOKIE= 妖火Cookie
 @env YH_PASSWORD= 你的妖火密码
-@env YH_POLL_SEC=2       # 轮询间隔秒数，建议2~3秒
-@env YH_TIMEOUT=18       # 请求超时时间，增大到18秒
+@env YH_POLL_SEC=2       # 基础轮询间隔
+@env YH_IDLE_SLEEP=5     # 空闲时加长休眠
+@env YH_TIMEOUT=18       # 请求超时时间
 """
 # 依赖声明
 """
@@ -26,17 +27,15 @@ instance: single
 
 import os
 import requests
-import socket
 import time
 import re
-import traceback
 import random
 from bs4 import BeautifulSoup
 from typing import Dict, List, Optional, Set
 from requests.adapters import HTTPAdapter
 
 # ======================================
-# 精简彩色日志 - 使用脚本原定义的hex颜色
+# 精简彩色日志
 # ======================================
 class ZLog:
     @staticmethod
@@ -46,71 +45,73 @@ class ZLog:
 
     @staticmethod
     def color_part(text, hex_color):
-        """返回带颜色的文本片段"""
         r, g, b = ZLog.hex_to_rgb(hex_color)
         color = f"\033[38;2;{r};{g};{b}m"
         reset = "\033[0m"
         return f"{color}{text}{reset}"
 
-    # 原定义的颜色
     @staticmethod
     def s(msg):
         r, g, b = ZLog.hex_to_rgb("#2ecc71")
-        color = f"\033[38;2;{r};{g};{b}m"
-        reset = "\033[0m"
-        print(f"{color}{msg}{reset}")
+        print(f"\033[38;2;{r};{g};{b}m{msg}\033[0m")
     @staticmethod
     def w(msg):
         r, g, b = ZLog.hex_to_rgb("#f39c12")
-        color = f"\033[38;2;{r};{g};{b}m"
-        reset = "\033[0m"
-        print(f"{color}{msg}{reset}")
+        print(f"\033[38;2;{r};{g};{b}m{msg}\033[0m")
     @staticmethod
     def e(msg):
         r, g, b = ZLog.hex_to_rgb("#e74c3c")
-        color = f"\033[38;2;{r};{g};{b}m"
-        reset = "\033[0m"
-        print(f"{color}{msg}{reset}")
+        print(f"\033[38;2;{r};{g};{b}m{msg}\033[0m")
     @staticmethod
     def d(msg):
         r, g, b = ZLog.hex_to_rgb("#3498db")
-        color = f"\033[38;2;{r};{g};{b}m"
-        reset = "\033[0m"
-        print(f"{color}{msg}{reset}")
+        print(f"\033[38;2;{r};{g};{b}m{msg}\033[0m")
 
-# 颜色定义（使用脚本原定义的hex）
 COLORS = {
-    'blue': '#3498db',      # 蓝色 - 发起者、应战者、金额
-    'green': '#2ecc71',     # 绿色 - 赢字
-    'red': '#e74c3c',       # 红色 - 输字
-    'black': '#000000',     # 黑色 - 结果
-    'white': '#ffffff',     # 白色 - 分隔符
-    'grey': '#efefef'       # 灰色
+    'blue': '#3498db',
+    'green': '#2ecc71',
+    'red': '#e74c3c',
+    'grey': '#efefef'
 }
 
 # ======================================
-# 配置 (增大超时、默认轮询间隔放缓)
+# 全局配置
 # ======================================
 COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
+
 try:
-    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 2))  # 默认改为2秒
+    BASE_POLL = int(os.getenv("YH_POLL_SEC", 2))
 except ValueError:
-    POLL_INTERVAL = 2
+    BASE_POLL = 2
+
 try:
-    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 18))     # 超时改为18秒
+    IDLE_SLEEP = int(os.getenv("YH_IDLE_SLEEP", 5))
+except ValueError:
+    IDLE_SLEEP = 5
+
+try:
+    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 18))
 except ValueError:
     REQ_TIMEOUT = 18
+
+# 投注金额阈值
+BET_THRESHOLD = 20000
+# 异常ID屏蔽时长(秒)
+BAN_SEC = 8
+# 详情缓存有效期(秒)
+DETAIL_CACHE_TTL = 3
+# 随机抖动范围 ±0.3 秒
+JITTER_RANGE = 0.3
 
 BASE_URL = 'https://yaohuo.me'
 MONITOR_URL = f'{BASE_URL}/games/chuiniu/'
 API_BET = f'{BASE_URL}/games/chuiniu/add.aspx'
 
 # ======================================
-# 连接优化：禁用连接池、每次短连接，适配站点
+# 请求会话优化
 # ======================================
 session = requests.Session()
-# 清空连接池，不复用连接，解决长连接超时问题
 adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1)
 session.mount('http://', adapter)
 session.mount('https://', adapter)
@@ -118,7 +119,7 @@ session.mount('https://', adapter)
 REQUEST_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Connection': 'close',  # 强制短连接
+    'Connection': 'close',
     'Cookie': COOKIE,
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
@@ -130,24 +131,11 @@ session.headers.update(REQUEST_HEADERS)
 def format_money(num):
     try:
         n = int(num)
-        if n >= 10000:
-            return f"{n / 10000:.1f}万"
-        else:
-            return f"{n}"
+        return f"{n / 10000:.1f}万" if n >= 10000 else f"{n}"
     except:
         return str(num)
 
-def parse_money(s):
-    try:
-        s = str(s).strip()
-        if '万' in s:
-            return int(float(s.replace('万', '')) * 10000)
-        else:
-            return int(s)
-    except:
-        return 0
-
-def request_with_retry(url, method="GET", data=None, max_retries=3):
+def request_with_retry(url, method="GET", data=None, max_retries=2):
     for attempt in range(1, max_retries + 1):
         try:
             if method.upper() == "GET":
@@ -160,17 +148,14 @@ def request_with_retry(url, method="GET", data=None, max_retries=3):
                 return None
             return resp
         except requests.exceptions.ReadTimeout:
-            # 单独处理读取超时，精简日志，不打印堆栈
             ZLog.w(f"请求超时: {url} 尝试 {attempt}/{max_retries}")
             if attempt < max_retries:
-                time.sleep(random.uniform(0.3, 0.8))
+                time.sleep(random.uniform(0.2, 0.4))
             continue
         except Exception as e:
-            err_info = f"请求异常 地址:{url} 尝试次数:{attempt}/{max_retries} 错误:{str(e)}"
-            ZLog.e(err_info)
+            ZLog.e(f"请求异常 {url}：{str(e)}")
             if attempt < max_retries:
-                time.sleep(0.5)
-    ZLog.e(f"请求最终失败: {url}")
+                time.sleep(random.uniform(0.2, 0.4))
     return None
 
 def verify_password():
@@ -185,151 +170,163 @@ def verify_password():
     return True
 
 # ======================================
-# 监控类：增加超时ID屏蔽、串行限流、防高频请求
+# 监控主类（带随机抖动 + 全量请求优化）
 # ======================================
-class YaohuoSpeedMonitor:
+class YaohuoMonitor:
     def __init__(self):
-        self.notified: Set[str] = set()          # 已开奖播报过的ID
-        self.monitoring: Dict[str, Dict] = {}     # 正在监控的条目
-        self.timeout_ids: Dict[str, float] = {}   # 临时超时ID + 下次可请求时间
+        self.notified: Set[str] = set()               # 已结束并播报，永久不再处理
+        self.monitoring: Dict[str, Dict] = {}         # 正在监控的对局
+        self.ban_ids: Dict[str, float] = {}          # 异常/超时ID 屏蔽列表
+        self.cache: Dict[str, (Dict, float)] = {}     # 详情缓存 {id: (数据, 过期时间)}
 
-    def get_all_ids(self) -> List[str]:
-        try:
-            resp = request_with_retry(MONITOR_URL)
-            if not resp:
-                return []
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            ids = []
-            for link in soup.find_all('a', href=re.compile(r'doit\.aspx\?id=\d+')):
-                bid = re.search(r'id=(\d+)', link['href']).group(1)
-                if bid not in ids:
-                    ids.append(bid)
-            return sorted(ids, key=lambda x: int(x), reverse=True)
-        except Exception as e:
-            ZLog.e("获取列表ID解析异常")
+    def clean_expire(self):
+        """统一清理所有过期数据"""
+        now = time.time()
+        self.ban_ids = {k: v for k, v in self.ban_ids.items() if v > now}
+        del_keys = [k for k, (_, t) in self.cache.items() if t < now]
+        for k in del_keys:
+            self.cache.pop(k, None)
+
+    def get_valid_ids(self) -> List[str]:
+        """大厅页提取ID + 金额前置过滤"""
+        resp = request_with_retry(MONITOR_URL)
+        if not resp:
             return []
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        target_ids = []
+        for link in soup.find_all('a', href=re.compile(r'doit\.aspx\?id=\d+')):
+            bid_match = re.search(r'id=(\d+)', link['href'])
+            if not bid_match:
+                continue
+            bid = bid_match.group(1)
+            if bid in self.notified or bid in self.ban_ids:
+                continue
+
+            title = link.get("title", "")
+            money_match = re.search(r'（(\d+)妖晶）', title)
+            if not money_match:
+                continue
+            money_val = int(money_match.group(1))
+            if money_val >= BET_THRESHOLD:
+                target_ids.append(bid)
+        return sorted(list(set(target_ids)), key=lambda x: int(x), reverse=True)
 
     def get_detail(self, bid: str) -> Optional[Dict]:
-        # 临时屏蔽短时间内连续超时的ID
+        """优先读缓存，缓存失效再请求"""
         now = time.time()
-        if bid in self.timeout_ids and now < self.timeout_ids[bid]:
+        if bid in self.ban_ids and now < self.ban_ids[bid]:
             return None
+        if bid in self.cache:
+            data, expire = self.cache[bid]
+            if now < expire:
+                return data
 
         url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&id={bid}'
         resp = request_with_retry(url)
         if not resp:
-            # 标记该ID 3秒内不再请求
-            self.timeout_ids[bid] = now + 3.0
+            self.ban_ids[bid] = now + BAN_SEC
+            self.cache.pop(bid, None)
             return None
-        # 清除超时标记
-        if bid in self.timeout_ids:
-            del self.timeout_ids[bid]
 
-        try:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            res = {'id': bid, '发起者': '未知', '应战者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中', '选择': '未知'}
+        res = {
+            'id': bid, '发起者': '未知', '应战者': '未知',
+            '赌注': '0', '答案': '未知', '结果': '未知',
+            '状态': '进行中', '选择': '未知'
+        }
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        for item in soup.find_all('div', class_='detail-item'):
+            lb = item.find('span', class_='detail-label')
+            val = item.find('span', class_='detail-value')
+            if lb and val:
+                t = lb.get_text().strip()
+                v = val.get_text().strip()
+                if '发起者' in t:
+                    res['发起者'] = v
+                elif '赌注金额' in t:
+                    res['赌注'] = v
 
-            for item in soup.find_all('div', class_='detail-item'):
-                lb = item.find('span', class_='detail-label')
-                val = item.find('span', class_='detail-value')
-                if lb and val:
-                    t = lb.get_text().strip()
-                    v = val.get_text().strip()
-                    if '发起者' in t:
-                        res['发起者'] = v
-                    elif '赌注金额' in t:
-                        res['赌注'] = v
-
-            text = soup.get_text()
-            if m := re.search(r'应战者\s*(\S+?)\s*选择：(答案[一二])', text):
+        text = soup.get_text()
+        m = re.search(r'应战者\s*(\S+?)\s*选择：(答案[一二])', text)
+        if m:
+            res['应战者'] = m.group(1).strip()
+            res['选择'] = m.group(2).strip()
+        else:
+            m = re.search(r'应战者\s*(\S+?)(?:\s|选择|$)', text)
+            if m:
                 res['应战者'] = m.group(1).strip()
-                res['选择'] = m.group(2).strip()
-            elif m := re.search(r'应战者\s*(\S+?)(?:\s|选择|$)', text):
-                res['应战者'] = m.group(1).strip()
 
-            if m := re.search(r'正确答案\s*(答案[一二])', text):
-                res['答案'] = m.group(1)
+        m = re.search(r'正确答案\s*(答案[一二])', text)
+        if m:
+            res['答案'] = m.group(1)
+        m = re.search(r'结果\s*(应战者胜出|应战者失败|发起者胜出|发起者失败)', text)
+        if m:
+            res['结果'] = m.group(1)
 
-            if m := re.search(r'结果\s*(应战者胜出|应战者失败|发起者胜出|发起者失败)', text):
-                res['结果'] = m.group(1)
+        if '结束时间' in text and res['结果'] != '未知':
+            res['状态'] = '已结束'
 
-            if '结束时间' in text and res['结果'] != '未知':
-                res['状态'] = '已结束'
-
-            return res
-        except Exception as e:
-            ZLog.w(f"解析[{bid}]数据异常")
-            return None
+        self.cache[bid] = (res, now + DETAIL_CACHE_TTL)
+        self.ban_ids.pop(bid, None)
+        return res
 
     def print_result(self, detail, is_win):
-        win_lose_color = COLORS['green'] if is_win else COLORS['red']
-        log_line = (
-            f"[{detail['id']}] \n"
+        color = COLORS['green'] if is_win else COLORS['red']
+        line = (
+            f"[{detail['id']}]\n"
             f"发: {ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
-            f"注: {ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | "
-            f"{detail['答案']} \n"
+            f"注: {ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | {detail['答案']}\n"
             f"应: {ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
-            f"选: {ZLog.color_part(detail['选择'], COLORS['grey'])} \n"
-            f"{ZLog.color_part(detail['结果'], win_lose_color)}"
+            f"选: {ZLog.color_part(detail['选择'], COLORS['grey'])}\n"
+            f"{ZLog.color_part(detail['结果'], color)}"
         )
-        print(log_line)
+        print(line)
+        print("=" * 30 + "\n")
 
     def run(self):
         print("\n" + "="*30)
-        print("妖火吹牛 - 极速静默监控（已优化超时）")
+        print("妖火监控 - 带随机抖动防风控版")
         print("="*30 + "\n")
 
         if not verify_password():
             return
+
         while True:
             try:
-                # 清理过期的超时ID
-                now = time.time()
-                self.timeout_ids = {k: v for k, v in self.timeout_ids.items() if v > now}
+                self.clean_expire()
+                all_ids = self.get_valid_ids()
+                has_active = False
 
-                all_ids = self.get_all_ids()
-
-                # 逐个拉取详情，增加随机休眠，限流防并发
                 for bid in all_ids:
-                    if bid in self.notified:
-                        continue
-                    if bid not in self.monitoring:
-                        # 每个详情请求之间小幅休眠
-                        time.sleep(random.uniform(0.2, 0.5))
-                        detail = self.get_detail(bid)
-                        if not detail:
-                            continue
-                        bet_amount = parse_money(detail['赌注'])
-                        if bet_amount >= 20000:
-                            self.monitoring[bid] = detail
-
-                # 检查监控中条目
-                completed = []
-                for bid in list(self.monitoring.keys()):
+                    # ID 之间小幅随机间隔，打散请求节奏
                     time.sleep(random.uniform(0.1, 0.3))
                     detail = self.get_detail(bid)
                     if not detail:
                         continue
+
                     if detail['状态'] == '已结束':
-                        result_text = detail['结果']
-                        is_win = '应战者胜出' in result_text or '发起者失败' in result_text
+                        is_win = '应战者胜出' in detail['结果'] or '发起者失败' in detail['结果']
                         self.print_result(detail, is_win)
-                        completed.append(bid)
                         self.notified.add(bid)
+                        self.monitoring.pop(bid, None)
+                        self.cache.pop(bid, None)
+                    else:
+                        self.monitoring[bid] = detail
+                        has_active = True
 
-                # 移除已完成任务
-                for bid in completed:
-                    print("="*30 + "\n")
-                    del self.monitoring[bid]
+                # 主轮询间隔 + ±0.3s 随机抖动
+                base_sleep = BASE_POLL if has_active else IDLE_SLEEP
+                jitter = random.uniform(-JITTER_RANGE, JITTER_RANGE)
+                actual_sleep = max(0.1, base_sleep + jitter)  # 保证最小休眠0.1秒，不出现负数
+                time.sleep(actual_sleep)
 
-                time.sleep(POLL_INTERVAL)
             except Exception as e:
                 ZLog.e(f"主循环异常: {str(e)}")
-                time.sleep(POLL_INTERVAL)
-
+                # 异常时也加抖动，保持随机性
+                err_jitter = random.uniform(-JITTER_RANGE, JITTER_RANGE)
+                time.sleep(max(0.1, BASE_POLL + err_jitter))
 
 def main():
-    m = YaohuoSpeedMonitor()
+    m = YaohuoMonitor()
     m.run()
 
 if __name__ == "__main__":
