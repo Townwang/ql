@@ -11,8 +11,8 @@ instance: single
 """
 @env YH_COOKIE= 妖火Cookie
 @env YH_PASSWORD= 你的妖火密码
-@env YH_POLL_SEC=1       # 轮询间隔秒数，默认1秒
-@env YH_TIMEOUT=10       # 请求超时时间
+@env YH_POLL_SEC=2       # 轮询间隔秒数，建议2~3秒
+@env YH_TIMEOUT=18       # 请求超时时间，增大到18秒
 """
 # 依赖声明
 """
@@ -30,6 +30,7 @@ import socket
 import time
 import re
 import traceback
+import random
 from bs4 import BeautifulSoup
 from typing import Dict, List, Optional, Set
 from requests.adapters import HTTPAdapter
@@ -88,44 +89,38 @@ COLORS = {
 }
 
 # ======================================
-# 配置
+# 配置 (增大超时、默认轮询间隔放缓)
 # ======================================
 COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 try:
-    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 0.2))  # 默认1秒
+    POLL_INTERVAL = int(os.getenv("YH_POLL_SEC", 2))  # 默认改为2秒
 except ValueError:
-    POLL_INTERVAL = 1
+    POLL_INTERVAL = 2
 try:
-    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 10))
+    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 18))     # 超时改为18秒
 except ValueError:
-    REQ_TIMEOUT = 10
+    REQ_TIMEOUT = 18
 
 BASE_URL = 'https://yaohuo.me'
 MONITOR_URL = f'{BASE_URL}/games/chuiniu/'
 API_BET = f'{BASE_URL}/games/chuiniu/add.aspx'
 
 # ======================================
-# TCP连接优化
+# 连接优化：禁用连接池、每次短连接，适配站点
 # ======================================
-class TCPOptimizedAdapter(HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        kwargs['socket_options'] = [
-            (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
-            (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
-        ]
-        return super().init_poolmanager(*args, **kwargs)
-
 session = requests.Session()
-session.mount('http://', TCPOptimizedAdapter(pool_connections=30, pool_maxsize=100, pool_block=False))
-session.mount('https://', TCPOptimizedAdapter(pool_connections=30, pool_maxsize=100, pool_block=False))
+# 清空连接池，不复用连接，解决长连接超时问题
+adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
 
 REQUEST_HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Connection': 'close',
+    'Connection': 'close',  # 强制短连接
     'Cookie': COOKIE,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 session.headers.update(REQUEST_HEADERS)
 
@@ -164,11 +159,15 @@ def request_with_retry(url, method="GET", data=None, max_retries=3):
                 ZLog.e("Cookie失效，请更新")
                 return None
             return resp
+        except requests.exceptions.ReadTimeout:
+            # 单独处理读取超时，精简日志，不打印堆栈
+            ZLog.w(f"请求超时: {url} 尝试 {attempt}/{max_retries}")
+            if attempt < max_retries:
+                time.sleep(random.uniform(0.3, 0.8))
+            continue
         except Exception as e:
-            # 网络/请求异常，打印详细堆栈
             err_info = f"请求异常 地址:{url} 尝试次数:{attempt}/{max_retries} 错误:{str(e)}"
             ZLog.e(err_info)
-            ZLog.e(traceback.format_exc())
             if attempt < max_retries:
                 time.sleep(0.5)
     ZLog.e(f"请求最终失败: {url}")
@@ -186,13 +185,14 @@ def verify_password():
     return True
 
 # ======================================
-# 极速静默监控类 - 修复漏单 + 网络异常详细日志
+# 监控类：增加超时ID屏蔽、串行限流、防高频请求
 # ======================================
 class YaohuoSpeedMonitor:
     def __init__(self):
-        self.notified: Set[str] = set()  # 已开奖播报过的ID
-        self.monitoring: Dict[str, Dict] = {}  # 正在监控的条目
-    
+        self.notified: Set[str] = set()          # 已开奖播报过的ID
+        self.monitoring: Dict[str, Dict] = {}     # 正在监控的条目
+        self.timeout_ids: Dict[str, float] = {}   # 临时超时ID + 下次可请求时间
+
     def get_all_ids(self) -> List[str]:
         try:
             resp = request_with_retry(MONITOR_URL)
@@ -207,19 +207,28 @@ class YaohuoSpeedMonitor:
             return sorted(ids, key=lambda x: int(x), reverse=True)
         except Exception as e:
             ZLog.e("获取列表ID解析异常")
-            ZLog.e(traceback.format_exc())
             return []
-    
+
     def get_detail(self, bid: str) -> Optional[Dict]:
+        # 临时屏蔽短时间内连续超时的ID
+        now = time.time()
+        if bid in self.timeout_ids and now < self.timeout_ids[bid]:
+            return None
+
         url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&touserid=24770&id={bid}'
         resp = request_with_retry(url)
         if not resp:
+            # 标记该ID 3秒内不再请求
+            self.timeout_ids[bid] = now + 3.0
             return None
+        # 清除超时标记
+        if bid in self.timeout_ids:
+            del self.timeout_ids[bid]
+
         try:
             soup = BeautifulSoup(resp.text, 'html.parser')
             res = {'id': bid, '发起者': '未知', '应战者': '未知', '赌注': '0', '答案': '未知', '结果': '未知', '状态': '进行中', '选择': '未知'}
-            
-            # 从detail-item中解析发起者和赌注
+
             for item in soup.find_all('div', class_='detail-item'):
                 lb = item.find('span', class_='detail-label')
                 val = item.find('span', class_='detail-value')
@@ -230,49 +239,30 @@ class YaohuoSpeedMonitor:
                         res['发起者'] = v
                     elif '赌注金额' in t:
                         res['赌注'] = v
-            
-            # 从全文本解析应战者
+
             text = soup.get_text()
-            
-            # 解析应战者和选择
             if m := re.search(r'应战者\s*(\S+?)\s*选择：(答案[一二])', text):
                 res['应战者'] = m.group(1).strip()
                 res['选择'] = m.group(2).strip()
             elif m := re.search(r'应战者\s*(\S+?)(?:\s|选择|$)', text):
                 res['应战者'] = m.group(1).strip()
-            
-            # 解析正确答案
+
             if m := re.search(r'正确答案\s*(答案[一二])', text):
                 res['答案'] = m.group(1)
-            
-            # 解析结果
+
             if m := re.search(r'结果\s*(应战者胜出|应战者失败|发起者胜出|发起者失败)', text):
                 res['结果'] = m.group(1)
-            
-            # 判断状态
+
             if '结束时间' in text and res['结果'] != '未知':
                 res['状态'] = '已结束'
-            
+
             return res
         except Exception as e:
             ZLog.w(f"解析[{bid}]数据异常")
-            ZLog.e(traceback.format_exc())
             return None
-    
+
     def print_result(self, detail, is_win):
-        """
-        配色要求（无时间戳）：
-        - 发起者: 蓝色 (#3498db)
-        - 应战者: 蓝色 (#3498db)
-        - 金额: 蓝色 (#3498db)
-        - 赢字: 绿色 (#2ecc71)
-        - 输字: 红色 (#e74c3c)
-        - 结果文字: 黑色 (#000000)
-        """
-        # 修复原代码语法错误：detail() → detail
         win_lose_color = COLORS['green'] if is_win else COLORS['red']
-        
-        # 构建彩色日志行（已去掉时间戳！）
         log_line = (
             f"[{detail['id']}] \n"
             f"发: {ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
@@ -282,57 +272,59 @@ class YaohuoSpeedMonitor:
             f"选: {ZLog.color_part(detail['选择'], COLORS['grey'])} \n"
             f"{ZLog.color_part(detail['结果'], win_lose_color)}"
         )
-        
         print(log_line)
-    
+
     def run(self):
         print("\n" + "="*30)
-        print("妖火吹牛 - 极速静默监控")
+        print("妖火吹牛 - 极速静默监控（已优化超时）")
         print("="*30 + "\n")
-        
+
         if not verify_password():
             return
         while True:
             try:
-                # 1. 获取所有ID
+                # 清理过期的超时ID
+                now = time.time()
+                self.timeout_ids = {k: v for k, v in self.timeout_ids.items() if v > now}
+
                 all_ids = self.get_all_ids()
-                
-                # 2. 检查新ID，>=2w全部入监控【不再过滤进行中/已结束】
+
+                # 逐个拉取详情，增加随机休眠，限流防并发
                 for bid in all_ids:
                     if bid in self.notified:
                         continue
                     if bid not in self.monitoring:
+                        # 每个详情请求之间小幅休眠
+                        time.sleep(random.uniform(0.2, 0.5))
                         detail = self.get_detail(bid)
                         if not detail:
                             continue
                         bet_amount = parse_money(detail['赌注'])
                         if bet_amount >= 20000:
                             self.monitoring[bid] = detail
-                
-                # 3. 检查监控中的条目，开奖才输出
+
+                # 检查监控中条目
                 completed = []
                 for bid in list(self.monitoring.keys()):
+                    time.sleep(random.uniform(0.1, 0.3))
                     detail = self.get_detail(bid)
                     if not detail:
                         continue
                     if detail['状态'] == '已结束':
                         result_text = detail['结果']
                         is_win = '应战者胜出' in result_text or '发起者失败' in result_text
-                        # 输出日志
                         self.print_result(detail, is_win)
                         completed.append(bid)
                         self.notified.add(bid)
-                
-                # 4. 播报成功后移除
+
+                # 移除已完成任务
                 for bid in completed:
                     print("="*30 + "\n")
                     del self.monitoring[bid]
-                
-                # 5. 使用环境变量配置间隔，不再固定0.1
+
                 time.sleep(POLL_INTERVAL)
             except Exception as e:
-                ZLog.e("主循环发生未知异常")
-                ZLog.e(traceback.format_exc())
+                ZLog.e(f"主循环异常: {str(e)}")
                 time.sleep(POLL_INTERVAL)
 
 
