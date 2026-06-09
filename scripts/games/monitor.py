@@ -215,7 +215,7 @@ class YaohuoSpeedMonitor:
         if bid in self.timeout_ids and now < self.timeout_ids[bid]:
             return None
 
-        url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&touserid=24770&id={bid}'
+        url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&id={bid}'
         resp = request_with_retry(url)
         if not resp:
             # 标记该ID 3秒内不再请求
