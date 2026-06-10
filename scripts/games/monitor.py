@@ -80,8 +80,7 @@ COLORS = {
 # 全局配置
 # ======================================
 # 默认Cookie（已内置）
-DEFAULT_COOKIE = "ASP.NET_SessionId=mxh2axtckib1nss2x2wxx4lf; GUID=07a5a50209183821; __itrace_wid=3500e4e0-a4b5-47b4-97ef-6f1f9fbab3b9; ui_preference=1; hideUseless=0; medalDisplayCount=10; theme_preference=0; font_preference=0; sidyaohuo=0C9F5256EE1FBF0_710_04770_25110_51001-2; _d_id=367131bff1dade92ab09cd746cbe38"
-COOKIE = os.getenv("YH_COOKIE", DEFAULT_COOKIE).strip()
+COOKIE = os.getenv("YH_COOKIE", "").strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 try:
@@ -99,7 +98,7 @@ try:
 except ValueError:
     REQ_TIMEOUT = 25
 
-BET_THRESHOLD = 5000
+BET_THRESHOLD = 20000
 BAN_SEC = 8
 DETAIL_CACHE_TTL = 3
 JITTER_RANGE = 0.3
