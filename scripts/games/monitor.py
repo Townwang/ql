@@ -355,6 +355,9 @@ class YaohuoMonitor:
         while True:
             try:
                 loop_count += 1
+                now_time = time.strftime('%Y-%m-%d %H:%M:%S')
+                if time.strftime('%H:%M:%S') == "00:00:00":
+                    print(f"{now_time}")
                 self.clean_expire()
                 all_ids = self.get_valid_ids()
                 has_active = False
