@@ -5,7 +5,6 @@
 name: 妖火监控
 tag: 游戏,妖火
 instance: single
-
 """
 # 变量声明 （可设置在docker环境变量）
 """
@@ -13,7 +12,9 @@ instance: single
 @env YH_PASSWORD= 你的妖火密码
 @env YH_POLL_SEC=2       # 基础轮询间隔
 @env YH_IDLE_SLEEP=5     # 空闲时加长休眠
-@env YH_TIMEOUT=18       # 请求超时时间
+@env YH_TIMEOUT=25       # 请求超时时间
+@env HTTP_PROXY= 可选代理地址
+@env HTTPS_PROXY= 可选代理地址
 """
 # 依赖声明
 """
@@ -33,6 +34,7 @@ import random
 from bs4 import BeautifulSoup
 from typing import Dict, List, Optional, Set
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ======================================
 # 精简彩色日志
@@ -77,7 +79,9 @@ COLORS = {
 # ======================================
 # 全局配置
 # ======================================
-COOKIE = os.getenv("YH_COOKIE", "").strip()
+# 默认Cookie（已内置）
+DEFAULT_COOKIE = "ASP.NET_SessionId=mxh2axtckib1nss2x2wxx4lf; GUID=07a5a50209183821; __itrace_wid=3500e4e0-a4b5-47b4-97ef-6f1f9fbab3b9; ui_preference=1; hideUseless=0; medalDisplayCount=10; theme_preference=0; font_preference=0; sidyaohuo=0C9F5256EE1FBF0_710_04770_25110_51001-2; _d_id=367131bff1dade92ab09cd746cbe38"
+COOKIE = os.getenv("YH_COOKIE", DEFAULT_COOKIE).strip()
 PASSWORD = os.getenv("YH_PASSWORD", "").strip()
 
 try:
@@ -91,17 +95,13 @@ except ValueError:
     IDLE_SLEEP = 5
 
 try:
-    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 18))
+    REQ_TIMEOUT = int(os.getenv("YH_TIMEOUT", 25))
 except ValueError:
-    REQ_TIMEOUT = 18
+    REQ_TIMEOUT = 25
 
-# 投注金额阈值
 BET_THRESHOLD = 5000
-# 异常ID屏蔽时长(秒)
 BAN_SEC = 8
-# 详情缓存有效期(秒)
 DETAIL_CACHE_TTL = 3
-# 随机抖动范围 ±0.3 秒
 JITTER_RANGE = 0.3
 
 BASE_URL = 'https://yaohuo.me'
@@ -109,21 +109,46 @@ MONITOR_URL = f'{BASE_URL}/games/chuiniu/'
 API_BET = f'{BASE_URL}/games/chuiniu/add.aspx'
 
 # ======================================
-# 请求会话优化
+# 请求会话（修复版）
 # ======================================
 session = requests.Session()
-adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1)
+
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+)
+adapter = HTTPAdapter(
+    pool_connections=5,
+    pool_maxsize=10,
+    max_retries=retry_strategy,
+    pool_block=False
+)
 session.mount('http://', adapter)
 session.mount('https://', adapter)
 
 REQUEST_HEADERS = {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Connection': 'close',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
     'Cookie': COOKIE,
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Referer': BASE_URL,
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Upgrade-Insecure-Requests': '1'
 }
 session.headers.update(REQUEST_HEADERS)
+
+# 自动支持代理
+proxy_http = os.getenv('HTTP_PROXY', os.getenv('http_proxy', ''))
+proxy_https = os.getenv('HTTPS_PROXY', os.getenv('https_proxy', ''))
+if proxy_http or proxy_https:
+    session.proxies = {'http': proxy_http, 'https': proxy_https}
+    ZLog.d(f"已启用代理")
 
 # ======================================
 # 工具函数
@@ -135,13 +160,13 @@ def format_money(num):
     except:
         return str(num)
 
-def request_with_retry(url, method="GET", data=None, max_retries=2):
+def request_with_retry(url, method="GET", data=None, max_retries=3):
     for attempt in range(1, max_retries + 1):
         try:
             if method.upper() == "GET":
-                resp = session.get(url, timeout=REQ_TIMEOUT)
+                resp = session.get(url, timeout=REQ_TIMEOUT, allow_redirects=True)
             else:
-                resp = session.post(url, data=data, timeout=REQ_TIMEOUT)
+                resp = session.post(url, data=data, timeout=REQ_TIMEOUT, allow_redirects=True)
             resp.raise_for_status()
             if "请先登录" in resp.text:
                 ZLog.e("Cookie失效，请更新")
@@ -150,18 +175,29 @@ def request_with_retry(url, method="GET", data=None, max_retries=2):
         except requests.exceptions.ReadTimeout:
             ZLog.w(f"请求超时: {url} 尝试 {attempt}/{max_retries}")
             if attempt < max_retries:
-                time.sleep(random.uniform(0.2, 0.4))
+                time.sleep(random.uniform(0.5, 1.5) * attempt)
+            continue
+        except requests.exceptions.ConnectTimeout:
+            ZLog.w(f"连接超时: {url} 尝试 {attempt}/{max_retries}")
+            if attempt < max_retries:
+                time.sleep(random.uniform(1, 2) * attempt)
+            continue
+        except requests.exceptions.ConnectionError as e:
+            ZLog.w(f"连接错误: {url} 尝试 {attempt}/{max_retries}")
+            if attempt < max_retries:
+                time.sleep(random.uniform(1, 2) * attempt)
             continue
         except Exception as e:
-            ZLog.e(f"请求异常 {url}：{str(e)}")
+            ZLog.e(f"请求异常 {url}：{str(e)[:80]}")
             if attempt < max_retries:
-                time.sleep(random.uniform(0.2, 0.4))
+                time.sleep(random.uniform(0.5, 1))
+    ZLog.e(f"请求最终失败: {url}")
     return None
 
 def verify_password():
     if not PASSWORD:
-        ZLog.e("未设置YH_PASSWORD")
-        return False
+        ZLog.w("未设置YH_PASSWORD，将跳过投注功能")
+        return True
     request_with_retry(API_BET, "POST", {'needpassword': PASSWORD})
     resp = request_with_retry(API_BET, "GET")
     if resp and "请输入密码" in resp.text:
@@ -170,17 +206,18 @@ def verify_password():
     return True
 
 # ======================================
-# 监控主类（带随机抖动 + 全量请求优化）
+# 监控主类
 # ======================================
 class YaohuoMonitor:
     def __init__(self):
-        self.notified: Set[str] = set()               # 已结束并播报，永久不再处理
-        self.monitoring: Dict[str, Dict] = {}         # 正在监控的对局
-        self.ban_ids: Dict[str, float] = {}          # 异常/超时ID 屏蔽列表
-        self.cache: Dict[str, (Dict, float)] = {}     # 详情缓存 {id: (数据, 过期时间)}
+        self.notified: Set[str] = set()
+        self.monitoring: Dict[str, Dict] = {}
+        self.ban_ids: Dict[str, float] = {}
+        self.cache: Dict[str, tuple] = {}
+        self.request_success = 0
+        self.request_fail = 0
 
     def clean_expire(self):
-        """统一清理所有过期数据"""
         now = time.time()
         self.ban_ids = {k: v for k, v in self.ban_ids.items() if v > now}
         del_keys = [k for k, (_, t) in self.cache.items() if t < now]
@@ -188,10 +225,12 @@ class YaohuoMonitor:
             self.cache.pop(k, None)
 
     def get_valid_ids(self) -> List[str]:
-        """大厅页提取ID + 金额前置过滤"""
         resp = request_with_retry(MONITOR_URL)
         if not resp:
+            self.request_fail += 1
             return []
+        self.request_success += 1
+        
         soup = BeautifulSoup(resp.text, 'html.parser')
         target_ids = []
         for link in soup.find_all('a', href=re.compile(r'doit\.aspx\?id=\d+')):
@@ -201,7 +240,6 @@ class YaohuoMonitor:
             bid = bid_match.group(1)
             if bid in self.notified or bid in self.ban_ids:
                 continue
-
             title = link.get("title", "")
             money_match = re.search(r'（(\d+)妖晶）', title)
             if not money_match:
@@ -212,7 +250,6 @@ class YaohuoMonitor:
         return sorted(list(set(target_ids)), key=lambda x: int(x), reverse=True)
 
     def get_detail(self, bid: str) -> Optional[Dict]:
-        """优先读缓存，缓存失效再请求"""
         now = time.time()
         if bid in self.ban_ids and now < self.ban_ids[bid]:
             return None
@@ -224,9 +261,11 @@ class YaohuoMonitor:
         url = f'{BASE_URL}/games/chuiniu/book_view.aspx?type=0&id={bid}'
         resp = request_with_retry(url)
         if not resp:
+            self.request_fail += 1
             self.ban_ids[bid] = now + BAN_SEC
             self.cache.pop(bid, None)
             return None
+        self.request_success += 1
 
         res = {
             'id': bid, '发起者': '未知', '应战者': '未知',
@@ -284,20 +323,36 @@ class YaohuoMonitor:
 
     def run(self):
         print("\n" + "="*30)
-        print("妖火监控 - 带随机抖动防风控版")
+        print("妖火监控 - 修复连接超时版")
+        print(f"请求超时: {REQ_TIMEOUT}秒 | 重试: 3次")
+        print(f"监控阈值: {BET_THRESHOLD}妖晶")
         print("="*30 + "\n")
+
+        ZLog.d("正在测试网站连通性...")
+        test_resp = request_with_retry(BASE_URL)
+        if test_resp:
+            ZLog.s(f"连接成功! 状态码: {test_resp.status_code}")
+        else:
+            ZLog.e("连接测试失败!")
+            return
 
         if not verify_password():
             return
 
+        ZLog.d("开始监控...\n")
+        loop_count = 0
+        
         while True:
             try:
+                loop_count += 1
                 self.clean_expire()
                 all_ids = self.get_valid_ids()
                 has_active = False
 
+                if loop_count % 10 == 0:
+                    ZLog.d(f"轮询#{loop_count} | 成功:{self.request_success} 失败:{self.request_fail} | 待监控:{len(all_ids)}个")
+
                 for bid in all_ids:
-                    # ID 之间小幅随机间隔，打散请求节奏
                     time.sleep(random.uniform(0.1, 0.3))
                     detail = self.get_detail(bid)
                     if not detail:
@@ -313,17 +368,18 @@ class YaohuoMonitor:
                         self.monitoring[bid] = detail
                         has_active = True
 
-                # 主轮询间隔 + ±0.3s 随机抖动
                 base_sleep = BASE_POLL if has_active else IDLE_SLEEP
                 jitter = random.uniform(-JITTER_RANGE, JITTER_RANGE)
-                actual_sleep = max(0.1, base_sleep + jitter)  # 保证最小休眠0.1秒，不出现负数
+                actual_sleep = max(0.1, base_sleep + jitter)
                 time.sleep(actual_sleep)
 
+            except KeyboardInterrupt:
+                ZLog.w("用户中断，退出程序")
+                break
             except Exception as e:
-                ZLog.e(f"主循环异常: {str(e)}")
-                # 异常时也加抖动，保持随机性
+                ZLog.e(f"主循环异常: {str(e)[:100]}")
                 err_jitter = random.uniform(-JITTER_RANGE, JITTER_RANGE)
-                time.sleep(max(0.1, BASE_POLL + err_jitter))
+                time.sleep(max(1, BASE_POLL + err_jitter))
 
 def main():
     m = YaohuoMonitor()
