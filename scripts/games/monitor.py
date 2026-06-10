@@ -109,7 +109,7 @@ MONITOR_URL = f'{BASE_URL}/games/chuiniu/'
 API_BET = f'{BASE_URL}/games/chuiniu/add.aspx'
 
 # ======================================
-# 请求会话（修复版）
+# 请求会话（修复连接超时）
 # ======================================
 session = requests.Session()
 
@@ -148,7 +148,6 @@ proxy_http = os.getenv('HTTP_PROXY', os.getenv('http_proxy', ''))
 proxy_https = os.getenv('HTTPS_PROXY', os.getenv('https_proxy', ''))
 if proxy_http or proxy_https:
     session.proxies = {'http': proxy_http, 'https': proxy_https}
-    ZLog.d(f"已启用代理")
 
 # ======================================
 # 工具函数
@@ -225,6 +224,7 @@ class YaohuoMonitor:
             self.cache.pop(k, None)
 
     def get_valid_ids(self) -> List[str]:
+        """【修复】从链接文本提取金额，支持中文括号"""
         resp = request_with_retry(MONITOR_URL)
         if not resp:
             self.request_fail += 1
@@ -233,21 +233,30 @@ class YaohuoMonitor:
         
         soup = BeautifulSoup(resp.text, 'html.parser')
         target_ids = []
+        
         for link in soup.find_all('a', href=re.compile(r'doit\.aspx\?id=\d+')):
             bid_match = re.search(r'id=(\d+)', link['href'])
             if not bid_match:
                 continue
             bid = bid_match.group(1)
+            
             if bid in self.notified or bid in self.ban_ids:
                 continue
-            title = link.get("title", "")
-            money_match = re.search(r'（(\d+)妖晶）', title)
+
+            # 【关键修复】从链接文本提取，同时支持中文括号（）和英文括号()
+            link_text = link.get_text().strip()
+            money_match = re.search(r'[（(](\d+)妖晶[）)]', link_text)
+            
             if not money_match:
                 continue
+                
             money_val = int(money_match.group(1))
             if money_val >= BET_THRESHOLD:
-                target_ids.append(bid)
-        return sorted(list(set(target_ids)), key=lambda x: int(x), reverse=True)
+                target_ids.append((bid, money_val))
+
+        # 按金额降序，优先处理大额
+        target_ids.sort(key=lambda x: x[1], reverse=True)
+        return [bid for bid, _ in target_ids]
 
     def get_detail(self, bid: str) -> Optional[Dict]:
         now = time.time()
@@ -323,7 +332,7 @@ class YaohuoMonitor:
 
     def run(self):
         print("\n" + "="*30)
-        print("妖火监控 - 修复连接超时版")
+        print("妖火监控 - 最终修复版")
         print(f"请求超时: {REQ_TIMEOUT}秒 | 重试: 3次")
         print(f"监控阈值: {BET_THRESHOLD}妖晶")
         print("="*30 + "\n")
@@ -335,6 +344,10 @@ class YaohuoMonitor:
         else:
             ZLog.e("连接测试失败!")
             return
+
+        ZLog.d("测试提取对局ID...")
+        test_ids = self.get_valid_ids()
+        ZLog.s(f"成功提取到 {len(test_ids)} 个符合条件的对局ID")
 
         if not verify_password():
             return
@@ -349,7 +362,7 @@ class YaohuoMonitor:
                 all_ids = self.get_valid_ids()
                 has_active = False
 
-                if loop_count % 10 == 0:
+                if loop_count % 5 == 0:
                     ZLog.d(f"轮询#{loop_count} | 成功:{self.request_success} 失败:{self.request_fail} | 待监控:{len(all_ids)}个")
 
                 for bid in all_ids:
