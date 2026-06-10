@@ -96,7 +96,7 @@ except ValueError:
     REQ_TIMEOUT = 18
 
 # 投注金额阈值
-BET_THRESHOLD = 20000
+BET_THRESHOLD = 5000
 # 异常ID屏蔽时长(秒)
 BAN_SEC = 8
 # 详情缓存有效期(秒)
