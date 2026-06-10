@@ -73,7 +73,7 @@ COLORS = {
     'blue': '#3498db',
     'green': '#2ecc71',
     'red': '#e74c3c',
-    'grey': '#efefef'
+    'grey': '#666666'
 }
 
 # ======================================
@@ -223,7 +223,6 @@ class YaohuoMonitor:
             self.cache.pop(k, None)
 
     def get_valid_ids(self) -> List[str]:
-        """【修复】从链接文本提取金额，支持中文括号"""
         resp = request_with_retry(MONITOR_URL)
         if not resp:
             self.request_fail += 1
@@ -242,7 +241,6 @@ class YaohuoMonitor:
             if bid in self.notified or bid in self.ban_ids:
                 continue
 
-            # 【关键修复】从链接文本提取，同时支持中文括号（）和英文括号()
             link_text = link.get_text().strip()
             money_match = re.search(r'[（(](\d+)妖晶[）)]', link_text)
             
@@ -322,7 +320,7 @@ class YaohuoMonitor:
             f"[{detail['id']}]\n"
             f"发: {ZLog.color_part(detail['发起者'], COLORS['blue'])} | "
             f"注: {ZLog.color_part(format_money(detail['赌注']), COLORS['blue'])} | {detail['答案']}\n"
-            f"应: {ZLog.color_part(detail['应战者'], COLORS['blue'])} | "
+            f"应: {ZLog.color_part(detail['应战者'], COLORS['grey'])} | "
             f"选: {ZLog.color_part(detail['选择'], COLORS['grey'])}\n"
             f"{ZLog.color_part(detail['结果'], color)}"
         )
