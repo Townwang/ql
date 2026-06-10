@@ -360,10 +360,6 @@ class YaohuoMonitor:
                 self.clean_expire()
                 all_ids = self.get_valid_ids()
                 has_active = False
-
-                if loop_count % 5 == 0:
-                    ZLog.d(f"轮询#{loop_count} | 成功:{self.request_success} 失败:{self.request_fail} | 待监控:{len(all_ids)}个")
-
                 for bid in all_ids:
                     time.sleep(random.uniform(0.1, 0.3))
                     detail = self.get_detail(bid)
