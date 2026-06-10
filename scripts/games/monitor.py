@@ -73,7 +73,7 @@ COLORS = {
     'blue': '#3498db',
     'green': '#2ecc71',
     'red': '#e74c3c',
-    'grey': '#cecece'
+    'grey': '#cececece'
 }
 
 # ======================================
@@ -102,6 +102,8 @@ BET_THRESHOLD = 20000
 BAN_SEC = 8
 DETAIL_CACHE_TTL = 3
 JITTER_RANGE = 0.3
+# 已结束ID保留时长(秒)，超时自动清除黑名单，避免堆积
+NOTIFIED_KEEP_SEC = 1
 
 BASE_URL = 'https://yaohuo.me'
 MONITOR_URL = f'{BASE_URL}/games/chuiniu/'
@@ -204,23 +206,31 @@ def verify_password():
     return True
 
 # ======================================
-# 监控主类
+# 监控主类（修复无法发现新增ID问题）
 # ======================================
 class YaohuoMonitor:
     def __init__(self):
-        self.notified: Set[str] = set()
+        # 改造：增加时间戳，不再永久黑名单
+        self.notified: Dict[str, float] = {}    # {id: 结束时间戳}
         self.monitoring: Dict[str, Dict] = {}
         self.ban_ids: Dict[str, float] = {}
         self.cache: Dict[str, tuple] = {}
         self.request_success = 0
         self.request_fail = 0
+        self.last_all_ids: List[str] = []       # 记录上一轮ID列表，用于对比新增
 
     def clean_expire(self):
         now = time.time()
+        # 1. 清理超时屏蔽ID
         self.ban_ids = {k: v for k, v in self.ban_ids.items() if v > now}
+        # 2. 清理过期缓存
         del_keys = [k for k, (_, t) in self.cache.items() if t < now]
         for k in del_keys:
             self.cache.pop(k, None)
+        # 3. 清理【超时的已结束ID】，解除永久黑名单（核心修复1）
+        expired_notify = [k for k, t in self.notified.items() if now - t > NOTIFIED_KEEP_SEC]
+        for k in expired_notify:
+            self.notified.pop(k, None)
 
     def get_valid_ids(self) -> List[str]:
         resp = request_with_retry(MONITOR_URL)
@@ -238,7 +248,8 @@ class YaohuoMonitor:
                 continue
             bid = bid_match.group(1)
             
-            if bid in self.notified or bid in self.ban_ids:
+            # 临时屏蔽ID直接跳过
+            if bid in self.ban_ids:
                 continue
 
             link_text = link.get_text().strip()
@@ -329,9 +340,10 @@ class YaohuoMonitor:
 
     def run(self):
         print("\n" + "="*30)
-        print("妖火监控 - 最终修复版")
+        print("妖火监控 - 修复新增ID检测")
         print(f"请求超时: {REQ_TIMEOUT}秒 | 重试: 3次")
         print(f"监控阈值: {BET_THRESHOLD}妖晶")
+        print(f"已结束ID保留时长: {NOTIFIED_KEEP_SEC//60}分钟")
         print("="*30 + "\n")
 
         ZLog.d("正在测试网站连通性...")
@@ -344,6 +356,7 @@ class YaohuoMonitor:
 
         ZLog.d("测试提取对局ID...")
         test_ids = self.get_valid_ids()
+        self.last_all_ids = test_ids
         ZLog.s(f"成功提取到 {len(test_ids)} 个符合条件的对局ID")
 
         if not verify_password():
@@ -358,10 +371,22 @@ class YaohuoMonitor:
                 now_time = time.strftime('%Y-%m-%d %H:%M:%S')
                 if time.strftime('%H:%M:%S') == "00:00:00":
                     print(f"{now_time}")
+                    
                 self.clean_expire()
-                all_ids = self.get_valid_ids()
+                current_ids = self.get_valid_ids()
+                # 对比新旧列表，识别新增ID（核心修复2）
+                new_ids = [bid for bid in current_ids if bid not in self.last_all_ids]
+                if new_ids:
+                    ZLog.d(f"检测到 {len(new_ids)} 个新对局ID: {','.join(new_ids[:3])}{'...' if len(new_ids)>3 else ''}")
+                self.last_all_ids = current_ids
+
                 has_active = False
-                for bid in all_ids:
+                # 遍历当前全部有效ID（不再永久跳过旧ID）
+                for bid in current_ids:
+                    # 跳过还在保留期内的已结束ID
+                    if bid in self.notified:
+                        continue
+                        
                     time.sleep(random.uniform(0.1, 0.3))
                     detail = self.get_detail(bid)
                     if not detail:
@@ -370,7 +395,8 @@ class YaohuoMonitor:
                     if detail['状态'] == '已结束':
                         is_win = '应战者胜出' in detail['结果'] or '发起者失败' in detail['结果']
                         self.print_result(detail, is_win)
-                        self.notified.add(bid)
+                        # 记录结束时间，而非永久拉黑
+                        self.notified[bid] = time.time()
                         self.monitoring.pop(bid, None)
                         self.cache.pop(bid, None)
                     else:
