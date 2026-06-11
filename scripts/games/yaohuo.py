@@ -219,10 +219,10 @@ class ZLog:
 # 挑衅话术
 # ======================================
 def get_win_provoke_words():
-    return [f"████████████████████████████████"]
+    return [f"ࡇ𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡ࡇ"]
 
 def get_lose_provoke_words():
-    return [f"████████████████████████████████"]
+    return ["ࡇ𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡𖤣𖥧𖥣｡ࡇ"]
 
 def get_default_provoke_words():
     return ["🥺🥺🥺🥺🥺🥺"]
