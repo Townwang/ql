@@ -219,8 +219,7 @@ class ZLog:
 # 挑衅话术
 # ======================================
 def get_win_provoke_words():
-    return [f"　　　 
-       ∧∧
+    return [f"∧∧
 　　 (　ﾟдﾟ)
 　　 /　 つ つ
   (( (_＿ ﾉ
@@ -228,8 +227,7 @@ def get_win_provoke_words():
    ﾀﾀﾀﾀ...ᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟᅟ   "]
 
 def get_lose_provoke_words():
-    return [f"　　　
-       ∧∧
+    return [f"∧∧
 　　 (　ﾟдﾟ)
 　　 /　 つ つ
   (( (_＿ ﾉ
