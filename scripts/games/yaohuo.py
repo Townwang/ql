@@ -149,7 +149,7 @@ REQUEST_HEADERS = {
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'max-age=0',
-    'Connection': 'keep-alive',  # ✅ 修复
+    'Connection': 'keep-alive', 
     'Content-Type': 'application/x-www-form-urlencoded',
     'Cookie': COOKIE,
     'Origin': BASE_HOST,
@@ -219,10 +219,15 @@ class ZLog:
 # 挑衅话术
 # ======================================
 def get_win_provoke_words():
-    return [f"ࡇツࡇ"]
+    return ["Ready to lose?",
+        "Is that all u have?",
+        "Let’s see what you’ve got."
+    ]
 
 def get_lose_provoke_words():
-    return ["ࡇ㍿ࡇ"]
+    return ["Face me if you dare.",
+        "Come and challenge me."
+    ]
 
 def get_default_provoke_words():
     return ["🥺🥺🥺🥺🥺🥺"]
