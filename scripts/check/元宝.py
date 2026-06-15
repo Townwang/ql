@@ -1,200 +1,279 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# 添加任务
-"""
-name: 元宝bot
-tag: 抢注
-cron: 55 19 * * *
-"""
 """
 =============================================================================
-元宝派 - 免费 Bot 创建脚本【多线程并发修复增强版】
+元宝派 - 免费 Bot 创建脚本【直连版】
 =============================================================================
-定时规则
-上午场:    11:55 启动抢 12:00
-晚间场: 55 19 * * *   19:55 启动抢 20:00
-环境变量
-单账号: YUANBAO_COOKIE = 完整Cookie
-多账号: YUANBAO_COOKIE 多个Cookie用 换行/& 分隔
+
+【功能说明】
+    直连抢购元宝派每天 12:00 和 20:00 的免费 Bot 创建名额
+    异步协程高并发，提前开始循环，直到抢到成功或超时停止
+
+【青龙定时规则】
+    上午场: 58 11 * * *   （11:58 启动，抢 12:00 场）
+    下午场: 58 19 * * *   （19:58 启动，抢 20:00 场）
+
+【环境变量】
+    变量名: YUANBAO_COOKIE
+    变量值: 完整的 Cookie 字符串（多个账号用 & 分隔）
+
 =============================================================================
 """
 
 import os
-import requests
 import time
-import re
-import threading
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
+import aiohttp
+from datetime import datetime, timedelta
 
-# 青龙推送兼容
+# 青龙面板推送
 try:
     from notify import send
     SEND_FLAG = True
-except Exception:
+except ImportError:
     SEND_FLAG = False
     def send(title: str, content: str) -> None:
-        print(f"[推送] {title}: {content}")
+        print(f"[推送] {title}: {content[:200]}")
 
-# ==================== 可配置参数 ====================
-ADVANCE_SECONDS = 300       # 提前几秒开始(默认5分钟)
-MAX_RETRY_SECONDS = 120     # 整点后继续抢几秒(默认2分钟)
-THREAD_COUNT = 20           # 并发线程 10~30 为宜
-REQUEST_INTERVAL = 0.05     # 单线程请求间隔
-TIMEOUT = 8                 # 请求超时时间
+# ========== 配置 ==========
+ADVANCE_SECONDS = 3        # 提前秒数开始高频请求
+WARMUP_SECONDS = 60        # 预热阶段提前秒数
+MAX_RETRY_SECONDS = 90     # 整点后最多继续抢多少秒
+CONCURRENCY = 50           # 并发协程数
+REQUEST_TIMEOUT = 5        # 请求超时（秒）
 
-# 全局控制
-success_flag = False
-request_count = 0
-count_lock = threading.Lock()
+WARMUP_INTERVAL_MS = 500   # 预热间隔
+HOT_INTERVAL_MS = 20       # 高频间隔
+COOLDOWN_INTERVAL_MS = 50  # 整点后间隔
 
-def get_cookie_value(cookie_str, key):
-    """提取Cookie字段"""
-    match = re.search(rf'{key}=([^;]+)', cookie_str)
-    return match.group(1) if match else None
+# ========== Cookie解析 ==========
+def parse_cookies():
+    """解析多个账号的 Cookie"""
+    cookie_str = os.environ.get("YUANBAO_COOKIE", "")
+    if not cookie_str:
+        print("=" * 50)
+        print("❌ 错误: 未设置环境变量 YUANBAO_COOKIE")
+        print("=" * 50)
+        exit(1)
+    
+    accounts = []
+    for cookie in cookie_str.split("&"):
+        cookie = cookie.strip()
+        if not cookie:
+            continue
+        accounts.append({"cookie": cookie})
+    
+    if not accounts:
+        print("❌ 无有效账号")
+        exit(1)
+    
+    return accounts
 
-def send_notify(title, content):
-    """统一推送"""
-    try:
-        send(title, content)
-        print("✅ 推送发送成功")
-    except Exception as e:
-        print(f"❌ 推送失败: {str(e)}")
+# ========== 时间工具 ==========
+def get_target_time():
+    """获取目标场次时间"""
+    now = datetime.now()
+    if now.hour < 12 or (now.hour == 11 and now.minute >= 55):
+        return now.replace(hour=12, minute=0, second=0, microsecond=0), "12:00"
+    elif now.hour < 20 or (now.hour == 19 and now.minute >= 55):
+        return now.replace(hour=20, minute=0, second=0, microsecond=0), "20:00"
+    else:
+        tomorrow = now + timedelta(days=1)
+        return tomorrow.replace(hour=12, minute=0, second=0, microsecond=0), "明天 12:00"
 
-def grab_bot(cookie):
-    """单线程抢购任务"""
-    global success_flag, request_count
+def precise_sleep(seconds):
+    """精确睡眠"""
+    if seconds <= 0:
+        return
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        remaining = end - time.monotonic()
+        if remaining > 0.01:
+            time.sleep(remaining * 0.8)
+
+# ========== 核心抢购逻辑 ==========
+async def grab_single(session, account, target_time, result_holder):
+    """单个协程的抢购逻辑"""
     url = "https://yuanbao.tencent.com/api/v5/robotLogic/create"
-
     headers = {
         "Host": "yuanbao.tencent.com",
         "Origin": "https://yuanbao.tencent.com",
         "Referer": "https://yuanbao.tencent.com/e/claw/manage",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/json",
         "Accept": "application/json, text/plain, */*",
-        "Cookie": cookie,
+        "Cookie": account["cookie"],
     }
     payload = {"type": 1, "create_type": 1}
-
-    while not success_flag:
-        if time.time() > end_ts:
-            break
-
-        with count_lock:
-            request_count += 1
-            curr_cnt = request_count
-
+    
+    request_count = 0
+    end_time = target_time + timedelta(seconds=MAX_RETRY_SECONDS)
+    
+    while not result_holder["success"] and datetime.now() < end_time:
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
-            if resp.status_code != 200:
-                print(f"[{time.strftime('%H:%M:%S')}] 第{curr_cnt}次 HTTP{resp.status_code}")
-                time.sleep(REQUEST_INTERVAL)
-                continue
-
-            data = resp.json()
-            code = data.get("code", -1)
-            msg = data.get("msg", "")
-
-            if code == 0:
-                success_flag = True
-                print(f"\n[{time.strftime('%H:%M:%S')}] ✅ 抢购成功！总请求: {curr_cnt} | 提示: {msg}")
-                return True
-            else:
-                print(f"[{time.strftime('%H:%M:%S')}] 第{curr_cnt}次 失败 code:{code} {msg}")
-
+            request_count += 1
+            start = time.monotonic()
+            
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+                ssl=False
+            ) as resp:
+                cost = int((time.monotonic() - start) * 1000)
+                
+                if resp.status == 200:
+                    data = await resp.json()
+                    code = data.get("code", -1)
+                    
+                    if code == 0:
+                        result_holder["success"] = True
+                        result_holder["account"] = account["cookie"][:20]
+                        result_holder["cost"] = cost
+                        result_holder["count"] = request_count
+                        
+                        print(f"\n{'='*60}")
+                        print(f"✅ 抢 Bot 成功！")
+                        print(f"   耗时: {cost}ms")
+                        print(f"   请求次数: {request_count}")
+                        print(f"{'='*60}")
+                        return True
+                    
+                    now = datetime.now()
+                    remaining = (target_time - now).total_seconds()
+                    if remaining > 0:
+                        print(f"[{now.strftime('%H:%M:%S')}] 预热... {remaining:.1f}s", end="\r")
+                    else:
+                        print(f"[{now.strftime('%H:%M:%S')}] #{request_count} code={code} {cost}ms", end="\r")
+                
+        except asyncio.TimeoutError:
+            pass
         except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] 第{curr_cnt}次 异常: {str(e)[:30]}")
-
-        time.sleep(REQUEST_INTERVAL)
+            pass
+        
+        # 动态间隔
+        now = datetime.now()
+        remaining = (target_time - now).total_seconds()
+        
+        if remaining > WARMUP_SECONDS:
+            await asyncio.sleep(WARMUP_INTERVAL_MS / 1000)
+        elif remaining > ADVANCE_SECONDS:
+            await asyncio.sleep(WARMUP_INTERVAL_MS / 1000)
+        elif remaining > 0:
+            await asyncio.sleep(HOT_INTERVAL_MS / 1000)
+        else:
+            await asyncio.sleep(COOLDOWN_INTERVAL_MS / 1000)
+    
     return False
 
-def main():
-    global end_ts
-    cookie_raw = os.environ.get("YUANBAO_COOKIE", "").strip()
-    if not cookie_raw:
-        print("❌ 未配置环境变量 YUANBAO_COOKIE")
-        return
-
-    # 分割多账号
-    cookie_list = [c.strip() for c in cookie_raw.replace("&", "\n").splitlines() if c.strip()]
-    print(f"✅ 加载账号数量: {len(cookie_list)}")
-
-    # 校验每个Cookie
-    valid_cookies = []
-    for idx, ck in enumerate(cookie_list, 1):
-        token = get_cookie_value(ck, "hy_token")
-        user = get_cookie_value(ck, "hy_user")
-        if token and user:
-            valid_cookies.append(ck)
-            print(f"✅ 账号{idx} 校验通过")
-        else:
-            print(f"❌ 账号{idx} Cookie无效，跳过")
-
-    if not valid_cookies:
-        print("❌ 无有效Cookie，退出")
-        return
-
-    # 判定目标场次
-    now = time.localtime()
-    hour, minute = now.tm_hour, now.tm_min
-    target_list = []
-
-    # 匹配12点场
-    if (hour == 11 and minute >= 55) or hour == 12:
-        target_list.append((12, 0, "12:00 午场"))
-    # 匹配20点场
-    if (hour == 19 and minute >= 55) or hour == 20:
-        target_list.append((20, 0, "20:00 晚场"))
-
-    if not target_list:
-        print("⚠️ 当前不在抢购时段，脚本退出")
-        return
-
-    target_h, target_m, target_name = target_list[0]
-    # 构造目标时间戳
-    target_tm = (now.tm_year, now.tm_mon, now.tm_mday, target_h, target_m, 0,
-                 now.tm_wday, now.tm_yday, now.tm_isdst)
-    target_ts = time.mktime(target_tm)
-    start_ts = target_ts - ADVANCE_SECONDS
-    end_ts = target_ts + MAX_RETRY_SECONDS
-    now_ts = time.time()
-
-    print(f"\n==================== {target_name} 抢购 ====================")
-    print(f"开始时间: {time.strftime('%H:%M:%S', time.localtime(start_ts))}")
-    print(f"结束时间: {time.strftime('%H:%M:%S', time.localtime(end_ts))}")
-    print(f"并发线程: {THREAD_COUNT}")
-    print("===========================================================\n")
-
-    # 等待到开始时间
-    if now_ts < start_ts:
-        wait_sec = start_ts - now_ts
-        print(f"⏰ 等待 {int(wait_sec)} 秒后开始...")
-        time.sleep(wait_sec)
-    elif now_ts > end_ts:
-        print("⚠️ 已超过抢购截止时间，退出")
-        return
-
-    # 线程池执行
-    with ThreadPoolExecutor(max_workers=THREAD_COUNT) as executor:
-        # 循环分配有效账号
+async def grab_batch(accounts, target_time, target_desc):
+    """批量并发抢购"""
+    result_holder = {
+        "success": False,
+        "account": None,
+        "cost": 0,
+        "count": 0,
+    }
+    
+    total_concurrency = CONCURRENCY * len(accounts)
+    
+    print(f"\n🚀 直连抢购启动！")
+    print(f"   目标场次: {target_desc}")
+    print(f"   账号数量: {len(accounts)}")
+    print(f"   并发协程: {total_concurrency}")
+    print(f"   目标时间: {target_time.strftime('%H:%M:%S')}")
+    print("-" * 60)
+    
+    connector = aiohttp.TCPConnector(
+        limit=total_concurrency,
+        limit_per_host=total_concurrency,
+        ttl_dns_cache=300,
+    )
+    
+    async with aiohttp.ClientSession(connector=connector) as session:
         tasks = []
-        for i in range(THREAD_COUNT):
-            ck = valid_cookies[i % len(valid_cookies)]
-            tasks.append(executor.submit(grab_bot, ck))
+        for account in accounts:
+            for _ in range(CONCURRENCY):
+                task = asyncio.create_task(
+                    grab_single(session, account, target_time, result_holder)
+                )
+                tasks.append(task)
+        
+        timeout = MAX_RETRY_SECONDS + max(0, (target_time - datetime.now()).total_seconds()) + 5
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        
+        for task in pending:
+            task.cancel()
+        
+        await asyncio.gather(*pending, return_exceptions=True)
+    
+    return result_holder
 
-        # 轮询等待结束
-        while not success_flag and time.time() < end_ts:
-            time.sleep(0.2)
-
-    # 结果处理
-    if success_flag:
-        title = f"元宝派 {target_name} 抢购成功"
-        content = f"场次: {target_name}\n总请求数: {request_count}\n并发线程: {THREAD_COUNT}"
-        send_notify(title, content)
+# ========== 主函数 ==========
+async def main():
+    print("\n" + "=" * 60)
+    print("元宝派 Bot 抢购脚本【直连版】")
+    print(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60 + "\n")
+    
+    accounts = parse_cookies()
+    
+    print(f"✅ 加载 {len(accounts)} 个账号")
+    
+    target_time, target_desc = get_target_time()
+    now = datetime.now()
+    wait_seconds = (target_time - now).total_seconds()
+    
+    print(f"\n📋 当前状态:")
+    print(f"   当前时间: {now.strftime('%H:%M:%S')}")
+    print(f"   目标场次: {target_desc}")
+    print(f"   距离开始: {wait_seconds/60:.0f} 分钟")
+    
+    # 等待到预热时间
+    warmup_time = target_time - timedelta(seconds=WARMUP_SECONDS)
+    now = datetime.now()
+    
+    if now < warmup_time:
+        wait = (warmup_time - now).total_seconds()
+        print(f"\n⏰ 等待 {wait:.0f} 秒后进入预热阶段...")
+        precise_sleep(wait)
+    
+    # 开始抢购
+    result = await grab_batch(accounts, target_time, target_desc)
+    
+    # 推送结果
+    if result["success"]:
+        title = "元宝派 Bot 抢购成功"
+        content = (
+            f"✅ 抢购成功！\n"
+            f"场次: {target_desc}\n"
+            f"耗时: {result['cost']}ms\n"
+            f"并发数: {CONCURRENCY * len(accounts)}"
+        )
     else:
-        print(f"\n⏰ 抢购结束，未抢到名额，总请求: {request_count}")
-        send_notify(f"元宝派 {target_name} 抢购失败", f"场次: {target_name}\n总请求数: {request_count}")
+        title = "元宝派 Bot 抢购失败"
+        content = (
+            f"❌ 未抢到名额\n"
+            f"场次: {target_desc}\n"
+            f"账号数: {len(accounts)}"
+        )
+    
+    if SEND_FLAG:
+        try:
+            send(title, content)
+            print("\n✅ 推送已发送")
+        except Exception as e:
+            print(f"\n❌ 推送失败: {e}")
+    else:
+        print(f"\n{'='*60}")
+        print(f"【{title}】")
+        print(content)
+        print("=" * 60)
 
 if __name__ == "__main__":
-    print("========== 元宝派 Bot 多线程抢购脚本 启动 ==========")
-    main()
+    asyncio.run(main())
