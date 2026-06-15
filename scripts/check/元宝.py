@@ -19,7 +19,10 @@
 
 =============================================================================
 """
-
+"""
+@pip requests
+@pip aiohttp
+"""
 import os
 import time
 import asyncio
